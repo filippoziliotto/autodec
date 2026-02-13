@@ -25,7 +25,7 @@ def process_file(args):
         
         # Load mesh
         # Handle Scene vs Mesh
-        mesh_or_scene = trimesh.load(input_file, force='mesh')
+        mesh_or_scene = trimesh.load(input_file)
         if isinstance(mesh_or_scene, trimesh.Scene):
             if len(mesh_or_scene.geometry) == 0:
                 print(f"Empty scene {input_file}")
@@ -56,11 +56,14 @@ def process_file(args):
         normals_surface = mesh.face_normals[face_indices]
 
         # 2. Volume points
+        voxel_grid = mesh.voxelized(pitch=1.1/100)
+        voxel_grid = voxel_grid.fill()
+
         # Random uniform points in [-0.55, 0.55]
         points_vol = np.random.uniform(-0.55, 0.55, (n_points_vol, 3))
         
         # Check occupancy
-        occupancies = mesh.contains(points_vol)
+        occupancies = voxel_grid.is_filled(points_vol)
         packed_occ = np.packbits(occupancies)
         
         pcd = o3d.geometry.PointCloud()
@@ -110,7 +113,7 @@ def main():
     
     tasks = [(f, output_dir, args.n_surf, args.n_vol) for f in files]
     
-    with multiprocessing.Pool(args.num_workers, maxtasksperchild=100) as pool:
+    with multiprocessing.Pool(args.num_workers, maxtasksperchild=10) as pool:
         list(tqdm(pool.imap_unordered(process_file, tasks), total=len(tasks)))
 
 if __name__ == "__main__":
