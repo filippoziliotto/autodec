@@ -18,8 +18,8 @@ def extend_dict(outdict):
         outdict['recenter'] = cls.zeros((B, 3))
     if 'tapering' not in outdict: 
         outdict['tapering'] = cls.zeros((B, N, 2))
-    if 'bending' not in outdict: 
-        outdict['bending'] = cls.zeros((B, N, 2))
+    if 'bending' not in outdict or outdict['bending'].shape[-1] != 6: 
+        outdict['bending'] = cls.zeros((B, N, 6))
     return outdict
 
 class PredictionHandler:
@@ -198,18 +198,36 @@ class PredictionHandler:
         y = y*fy
 
         # Apply bending transformation
-        kb, alpha = bending
-        if(kb > 1e-3):
-            beta = np.arctan2(y, x)
-            r = np.sqrt(x**2 + y**2) * np.cos(alpha - beta)
-            gamma = z * kb
-            rho = (1.0 / kb) - r        
-            R = (1.0 / kb) - rho * np.cos(gamma)
+        def apply_bending_axis(x, y, z, val_kb, val_alpha, axis):
+            if val_kb < 1e-3: return x, y, z
+            
+            if axis == 'z':
+                u, v, w = x, y, z
+            elif axis == 'x':
+                u, v, w = y, z, x
+            elif axis == 'y':
+                u, v, w = z, x, y
+            
+            beta = np.arctan2(v, u)
+            r = np.sqrt(u**2 + v**2) * np.cos(val_alpha - beta)
+            gamma = w * val_kb
+            rho = (1.0 / val_kb) - r        
+            R = (1.0 / val_kb) - rho * np.cos(gamma)
 
-            # 3. Rotate back
-            x = x + (R - r)*np.cos(alpha)
-            y = y + (R - r)*np.sin(alpha)
-            z = rho * np.sin(gamma)
+            u = u + (R - r)*np.cos(val_alpha)
+            v = v + (R - r)*np.sin(val_alpha)
+            w = rho * np.sin(gamma)
+            
+            if axis == 'z':
+                return u, v, w
+            elif axis == 'x':
+                return w, u, v
+            elif axis == 'y':
+                return v, w, u
+
+        x, y, z = apply_bending_axis(x, y, z, bending[4], bending[5], 'y')
+        x, y, z = apply_bending_axis(x, y, z, bending[2], bending[3], 'x')
+        x, y, z = apply_bending_axis(x, y, z, bending[0], bending[1], 'z')
 
         vertices =  np.concatenate([np.expand_dims(x, 1),
                                     np.expand_dims(y, 1),

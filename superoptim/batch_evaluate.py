@@ -15,13 +15,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--type", type=str, default="empty", help="Type of superq module (empty, segmented, etc.)")
     parser.add_argument("--prefix", type=str, default="shapenet_test", help="Npz file prefix")
+    parser.add_argument("--small", action='store_true', help="Run eval on only 128 objects")
     args = parser.parse_args()
 
     try:
         # Import dynamically based on type
         module_name = f"superoptim.{args.type}.batch_superq"
-        if args.type == "none":
-            module_name = f"superoptim.iou.batch_superq"
         module = importlib.import_module(module_name)
         BatchSuperQMulti = module.BatchSuperQMulti
     except ImportError:
@@ -59,6 +58,10 @@ def main():
         print("Cannot locate ground truth data")
         exit()
 
+    if args.small:
+        random.seed(0)
+        valid_objs = random.sample(valid_objs, 128)
+    
     # valid_objs = valid_objs[:32] # Limit to 32 objects for testing
     print(f"Loaded {len(valid_objs)} objects from all categories out of {pred_handler.scale.shape[0]}.")
 
@@ -80,7 +83,7 @@ def main():
     
     # Store per-object metrics for ranking
     object_metrics = [] # List of tuples: (index, name, chamfer_l1)
-    batch_size = 128
+    batch_size = 96
     
     for i in tqdm(range(0, len(valid_objs), batch_size), desc="Processing batches"):
         batch_objs = valid_objs[i : i + batch_size]
@@ -134,16 +137,20 @@ def main():
                             "raw_tapering": superq.raw_tapering[b].clone(),
                             "translation": superq.translation[b].clone()
                         }
+                        if hasattr(superq, "raw_bending"):
+                            best_params[b]["raw_bending"] = superq.raw_bending[b].clone()
         
         # Restore best parameters
         with torch.no_grad():
-             for b in range(len(batch_indices)):
-                  if best_params[b] is not None:
-                       superq.raw_scale[b].copy_(best_params[b]["raw_scale"])
-                       superq.raw_exponents[b].copy_(best_params[b]["raw_exponents"])
-                       superq.raw_rotation[b].copy_(best_params[b]["raw_rotation"])
-                       superq.raw_tapering[b].copy_(best_params[b]["raw_tapering"])
-                       superq.translation[b].copy_(best_params[b]["translation"])
+            for b in range(len(batch_indices)):
+                if best_params[b] is not None:
+                    superq.raw_scale[b].copy_(best_params[b]["raw_scale"])
+                    superq.raw_exponents[b].copy_(best_params[b]["raw_exponents"])
+                    superq.raw_rotation[b].copy_(best_params[b]["raw_rotation"])
+                    superq.raw_tapering[b].copy_(best_params[b]["raw_tapering"])
+                    superq.translation[b].copy_(best_params[b]["translation"])
+                    if hasattr(superq, "raw_bending"):
+                        superq.raw_bending[b].copy_(best_params[b]["raw_bending"])
 
         # Compute IoU using SDF
         # Load points.npz
@@ -232,9 +239,29 @@ def main():
             })
 
     # Save results
-    if args.type != "none":
+    if args.type != "none" or args.small:
         print(f"Saving optimized results to {output_npz}...")
-        pred_handler.save_npz(output_npz)
+        if args.small:
+            output_npz = output_npz.replace("output_npz", "output_npz/small")
+            sel_indices = [idx for idx, _ in valid_objs]
+            predictions = {
+                'names': np.array(pred_handler.names)[sel_indices],
+                'rescale': np.array(pred_handler.rescale)[sel_indices],
+                'recenter': np.array(pred_handler.recenter)[sel_indices],
+                'pc': np.array(pred_handler.pc)[sel_indices],
+                'assign_matrix': np.array(pred_handler.assign_matrix)[sel_indices],
+                'scale': np.array(pred_handler.scale)[sel_indices],
+                'rotation': np.array(pred_handler.rotation)[sel_indices],
+                'translation': np.array(pred_handler.translation)[sel_indices],
+                'exponents': np.array(pred_handler.exponents)[sel_indices],
+                'exist': np.array(pred_handler.exist)[sel_indices],
+                'tapering': np.array(pred_handler.tapering)[sel_indices],
+                'bending': np.array(pred_handler.bending)[sel_indices],
+            }
+            small_handler = PredictionHandler(predictions)
+            small_handler.save_npz(output_npz)
+        else:
+            pred_handler.save_npz(output_npz)
     
     # Save detailed metrics
     metrics_csv = output_npz.replace(".npz", "_metrics.csv")

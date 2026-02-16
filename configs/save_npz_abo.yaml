@@ -1,7 +1,7 @@
 # checkpoints_folder: checkpoints/abo
-checkpoints_folder: checkpoints/shapenet
-checkpoint_file: ckpt.pt
-output_dir: data/output_npz
+checkpoints_folder: checkpoints/abo
+checkpoint_file: epoch_350.pt
+output_dir: data/output_npz/abo_ft
 config_file: config.yaml
 device: "cuda"
 dataset: abo
