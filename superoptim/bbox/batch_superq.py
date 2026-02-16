@@ -44,12 +44,14 @@ class BatchSuperQMulti(nn.Module):
 
         for i, idx in enumerate(indices):
             # compute bbox on surface points
-            pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
-            bmin, _ = pts_surf.min(axis=0)
-            bmax, _ = pts_surf.max(axis=0)
-
-            center = (bmin + bmax) / 2.0
-            scale = (bmax - bmin) / 2.0
+            pts = pred_handler.pc[idx]
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pts)
+            obb = pcd.get_minimal_oriented_bounding_box()
+            
+            center = torch.tensor(obb.center, dtype=torch.float, device=device)
+            scale = torch.tensor(obb.extent, dtype=torch.float, device=device) / 2.0
+            R = torch.tensor(obb.R, dtype=torch.float, device=device)
 
             # create parameter arrays for N_max primitives, enable only first
             s_full = torch.ones((self.N_max, 3), dtype=torch.float, device=device)
@@ -58,6 +60,7 @@ class BatchSuperQMulti(nn.Module):
             e_full = torch.full((self.N_max, 2), 0.01, dtype=torch.float, device=device)
 
             r_full = torch.tile(torch.eye(3, dtype=torch.float, device=device), (self.N_max, 1, 1)).reshape(self.N_max, 3, 3)
+            r_full[0] = R
 
             t_full = torch.zeros((self.N_max, 3), dtype=torch.float, device=device)
             t_full[0] = center
@@ -139,16 +142,12 @@ class BatchSuperQMulti(nn.Module):
         x = x / fx
         y = y / fy
         
-        r0 = torch.sqrt(x**2 + y**2 + z**2)
-        
         term1 = safe_pow(safe_pow(x / sx, 2), 1 / e2)
         term2 = safe_pow(safe_pow(y / sy, 2), 1 / e2)
         term3 = safe_pow(safe_pow(z / sz, 2), 1 / e1)
         
         f_func = safe_pow(safe_pow(term1 + term2, e2 / e1) + term3, -e1 / 2)
-        
-        sdf = safe_mul(r0, (1 - f_func))
-        # sdf = (1 - f_func)
+        sdf = (1 - f_func) #no need to approximated distance, used only for eval
         return sdf
     
     def compute_losses(self, forward_out):
