@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import open3d as o3d
+import trimesh
 import math
 import os
 
@@ -45,13 +45,15 @@ class BatchSuperQMulti(nn.Module):
         for i, idx in enumerate(indices):
             # compute bbox on surface points
             pts = pred_handler.pc[idx]
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pts)
-            obb = pcd.get_minimal_oriented_bounding_box()
+            pcd = trimesh.points.PointCloud(pts)
+            obb = pcd.bounding_box_oriented
             
-            center = torch.tensor(obb.center, dtype=torch.float, device=device)
-            scale = torch.tensor(obb.extent, dtype=torch.float, device=device) / 2.0
-            R = torch.tensor(obb.R, dtype=torch.float, device=device)
+            obb_transform = obb.primitive.transform
+            obb_extents = obb.primitive.extents
+
+            center = torch.tensor(obb_transform[:3, 3], dtype=torch.float, device=device)
+            scale = torch.tensor(obb_extents, dtype=torch.float, device=device) / 2.0
+            R = torch.tensor(obb_transform[:3, :3], dtype=torch.float, device=device)
 
             # create parameter arrays for N_max primitives, enable only first
             s_full = torch.ones((self.N_max, 3), dtype=torch.float, device=device)

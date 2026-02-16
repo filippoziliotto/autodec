@@ -4,7 +4,8 @@ import os
 import multiprocessing
 import numpy as np
 import trimesh
-import open3d as o3d
+import torch
+from torch_geometric.nn import fps
 from tqdm import tqdm
 
 def process_file(args):
@@ -66,14 +67,14 @@ def process_file(args):
         occupancies = voxel_grid.is_filled(points_vol)
         packed_occ = np.packbits(occupancies)
         
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points_surface)
-        pcd.normals = o3d.utility.Vector3dVector(normals_surface)
-        downsampled_pcd = pcd.farthest_point_down_sample(4096)
-        
-        points_4096 = np.asarray(downsampled_pcd.points)
-        normals_4096 = np.asarray(downsampled_pcd.normals)
-        
+        # FPS downsampling with torch_geometric
+        points_tensor = torch.from_numpy(points_surface)
+        ratio = 4096 / points_surface.shape[0]
+        indices = fps(points_tensor, ratio=ratio)
+        indices = indices[:4096].numpy() #make sure it's 4096
+        points_4096 = points_surface[indices]
+        normals_4096 = normals_surface[indices]
+
         path_4096 = os.path.join(output_dir, 'pointcloud_4096.npz')
         
         # Save to files

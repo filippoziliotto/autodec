@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import open3d as o3d
 import math
 import os
 from typing import Optional, assert_never
@@ -82,10 +81,8 @@ class BatchSuperQMulti(nn.Module):
                 exit()
 
             if nrms is None:
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(pts.detach().cpu().numpy())
-                pcd.estimate_normals()
-                nrms = torch.tensor(np.array(pcd.normals), dtype=torch.float, device=device)
+                print(f"Normals are needed")
+                exit()
             
             self.points[i] = pts
 
