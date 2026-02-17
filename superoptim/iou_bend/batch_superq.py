@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import open3d as o3d
 import math
 import os
 
@@ -32,7 +31,7 @@ class BatchSuperQMulti(nn.Module):
         self.device = device
         self.truncation = truncation
         self.pred_handler = pred_handler
-        self.minS = 0.01
+        self.minS = 0.001
         self.minE, self.maxE = 0.1, 1.9
 
         B = len(indices)
@@ -79,10 +78,6 @@ class BatchSuperQMulti(nn.Module):
                 occ = torch.tensor(occ_tgt, dtype=torch.bool, device=device)
                 pts_iou = torch.tensor(points_iou, dtype=torch.float, device=device)
                 pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
-                # ply = ply.replace("pointcloud.npz", "pointcloud_4096.npz")
-                # pc = np.array(np.load(ply)['points'])
-                # pc_idx = np.random.choice(pc.shape[0], self.M_points_surf, replace=False)
-                # pts_surf = torch.tensor(pc[pc_idx], dtype=torch.float, device=device)
                 pts = torch.cat([pts_iou, pts_surf], dim=0)
             except Exception as e:
                 print(f"Error loading {points_file}: {e}")
@@ -111,6 +106,54 @@ class BatchSuperQMulti(nn.Module):
         self.bbox_min -= (self.bbox_max - self.bbox_min) * .025
         self.bbox_max += (self.bbox_max - self.bbox_min) * .025
 
+        self.reorient()
+
+    @torch.compile
+    def reorient(self):
+        with torch.no_grad():
+            s = self.scale()       # (B,N,3)
+            R = self.rotation()    # (B,N,3,3)
+            
+            sx = s[..., 0]
+            sy = s[..., 1]
+            sz = s[..., 2]
+
+            ratio = 2.5
+            mask_swap_xz = (sx > ratio * sz) & (sx > ratio * sy)
+            mask_swap_yz = (sy > ratio * sz) & (sy > ratio * sx)
+
+            new_s = s.clone()
+            
+            if mask_swap_xz.any():
+                new_s[mask_swap_xz, 0] = sz[mask_swap_xz]
+                new_s[mask_swap_xz, 2] = sx[mask_swap_xz]
+                
+            if mask_swap_yz.any():
+                new_s[mask_swap_yz, 1] = sz[mask_swap_yz]
+                new_s[mask_swap_yz, 2] = sy[mask_swap_yz]
+
+            self.raw_scale.data = torch.log(torch.clamp(new_s - self.minS, min=1e-6))
+            
+            new_R = R.clone()
+
+            if mask_swap_xz.any():
+                u = R[mask_swap_xz, :, 0]
+                v = R[mask_swap_xz, :, 1]
+                w = R[mask_swap_xz, :, 2]
+                new_R[mask_swap_xz, :, 0] = -w
+                new_R[mask_swap_xz, :, 1] = v
+                new_R[mask_swap_xz, :, 2] = u
+
+            if mask_swap_yz.any():
+                u = R[mask_swap_yz, :, 0]
+                v = R[mask_swap_yz, :, 1]
+                w = R[mask_swap_yz, :, 2]
+                new_R[mask_swap_yz, :, 0] = u
+                new_R[mask_swap_yz, :, 1] = -w
+                new_R[mask_swap_yz, :, 2] = v
+
+            self.raw_rotation.data = mat2quat(new_R)
+
     @torch.compile
     def scale(self):
         return torch.exp(self.raw_scale) + self.minS
@@ -130,7 +173,8 @@ class BatchSuperQMulti(nn.Module):
     @torch.compile
     def bending(self):
         # not accurate limit, but safe
-        max_scale, _ = torch.max(self.scale()[..., 0:2], keepdim=True, dim=-1)
+        tau = 0.01
+        max_scale = tau * torch.logsumexp(self.scale()/tau, keepdim=True, dim=-1)
         kb = (torch.sigmoid(self.raw_bending[..., 0::2]) * 0.95) / max_scale 
         alpha = torch.sigmoid(self.raw_bending[..., 1::2]) * 2 * torch.pi
         return kb, alpha
@@ -160,14 +204,17 @@ class BatchSuperQMulti(nn.Module):
         else:
              return x, y, z
 
+        # Precompute reciprocal efficiently
+        inv_kb = 1.0 / (kb + 1e-6)
+        
         angle_offset = torch.atan2(v, u)
         R = torch.sqrt(u**2 + v**2) * torch.cos(alpha - angle_offset)
-        gamma = torch.atan2(w, (1.0 / kb) - R)
-        r = (1.0 / kb) - torch.sqrt(w**2 + ((1.0 / kb) - R)**2)
+        gamma = torch.atan2(w, inv_kb - R)
+        r = inv_kb - torch.sqrt(w**2 + (inv_kb - R)**2)
         
         u = u - (R - r) * torch.cos(alpha)
         v = v - (R - r) * torch.sin(alpha)
-        w = (1.0 / kb) * gamma
+        w = inv_kb * gamma
 
         if axis == 'z':
             return u, v, w
@@ -241,14 +288,19 @@ class BatchSuperQMulti(nn.Module):
         s = self.scale()      # (B,N,3)
         R = self.rotation()   # (B,N,3,3)
         t = self.translation  # (B,N,3)
+        
+        taper = self.tapering() # (B,N,2)
+        sx = s[..., 0] * (1 + torch.abs(taper[..., 0]))
+        sy = s[..., 1] * (1 + torch.abs(taper[..., 1]))
+        sz = s[..., 2]
 
         local = torch.zeros(B, N, 6, 3, device=s.device)
-        local[:,:,0,0] =  s[:,:,0]  # +x
-        local[:,:,1,0] = -s[:,:,0]  # -x
-        local[:,:,2,1] =  s[:,:,1]  # +y
-        local[:,:,3,1] = -s[:,:,1]  # -y
-        local[:,:,4,2] =  s[:,:,2]  # +z
-        local[:,:,5,2] = -s[:,:,2]  # -z
+        local[:,:,0,0] =  sx  # +x
+        local[:,:,1,0] = -sx  # -x
+        local[:,:,2,1] =  sy  # +y
+        local[:,:,3,1] = -sy  # -y
+        local[:,:,4,2] =  sz  # +z
+        local[:,:,5,2] = -sz  # -z
 
         # rotate
         poles_world = torch.matmul(
@@ -262,7 +314,8 @@ class BatchSuperQMulti(nn.Module):
     
     def compute_losses(self, forward_out):
         sdfs = forward_out.get('sdfs')
-        
+        overlap = forward_out.get('overlap')
+
         temperature = 1e-3
         sdfs_iou = sdfs[:, :self.M_points_iou]
         pred_occ = torch.sigmoid(-sdfs_iou / temperature)
@@ -285,13 +338,15 @@ class BatchSuperQMulti(nn.Module):
         violation = torch.relu(self.bbox_min - poles) + torch.relu(poles - self.bbox_max)   # (B,N,6,3)
         dist = torch.linalg.norm(violation, dim=-1)  # (B,N,6)
         L_bbox = (dist * mask).sum(dim=2).mean(dim=1)
+
+        L_overlap = 1e-1 * overlap.mean(dim=1)
         
-        loss = -torch.log(iou) + Lsdf + L_bbox
-        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_bbox}
+        loss = -torch.log(iou) + Lsdf + L_bbox + L_overlap
+        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_overlap, "overlap": L_overlap}
     
     def forward(self):
-        all_sdfs = self.sdf_batch(self.points.transpose(1, 2)) # (B, N, M_total)
-        
+        all_sdfs = self.sdf_batch(self.points.transpose(1, 2).contiguous()) # (B, N, M_total)
+    
         # mask out non-existing primitives
         mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
         all_sdfs[~mask] = float('inf')
@@ -300,12 +355,32 @@ class BatchSuperQMulti(nn.Module):
         # min_sdf, _ = torch.min(all_sdfs, dim=1) # (B, M)
         tau = 0.01  # smaller = sharper min
         min_sdf = -tau * torch.logsumexp(-all_sdfs / tau, dim=1)  # (B, M)
+
+        temperature = 1e-3
+        indicator = torch.sigmoid(-(all_sdfs+self.truncation) / temperature)
+        overlap = torch.sum(torch.relu(indicator), dim=1)
         return {
             'sdfs': min_sdf,
+            'overlap': overlap,
         }
 
+    @torch.compile
+    def prune(self):
+        all_sdfs = self.sdf_batch(self.points.transpose(1, 2)[:, :, self.M_points_iou:].contiguous())
+        mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
+        all_sdfs[~mask] = float('inf')
+        idx_points = torch.argmin(all_sdfs, dim=1) 
+        counts_points = torch.zeros(all_sdfs.shape[0], all_sdfs.shape[1], device=all_sdfs.device)
+        for b in range(all_sdfs.shape[0]):
+            counts_points[b] = torch.bincount(idx_points[b], minlength=self.N_max).float()
+        return (counts_points <= 5) & self.exist_mask
+
     def update_handler(self, compute_meshes=True):
+        # prune_mask = self.prune()
+        # self.exist_mask &= ~prune_mask
+        # prune_mask = prune_mask.cpu()
         for i, idx in enumerate(self.indices):
+            # self.pred_handler.exist[idx][prune_mask[i]] = 0.
             mask = self.exist_mask[i].cpu().numpy()
             if not np.any(mask): continue
             

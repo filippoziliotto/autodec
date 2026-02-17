@@ -195,14 +195,19 @@ class BatchSuperQMulti(nn.Module):
         s = self.scale()      # (B,N,3)
         R = self.rotation()   # (B,N,3,3)
         t = self.translation  # (B,N,3)
+        
+        taper = self.tapering() # (B,N,2)
+        sx = s[..., 0] * (1 + torch.abs(taper[..., 0]))
+        sy = s[..., 1] * (1 + torch.abs(taper[..., 1]))
+        sz = s[..., 2]
 
         local = torch.zeros(B, N, 6, 3, device=s.device)
-        local[:,:,0,0] =  s[:,:,0]  # +x
-        local[:,:,1,0] = -s[:,:,0]  # -x
-        local[:,:,2,1] =  s[:,:,1]  # +y
-        local[:,:,3,1] = -s[:,:,1]  # -y
-        local[:,:,4,2] =  s[:,:,2]  # +z
-        local[:,:,5,2] = -s[:,:,2]  # -z
+        local[:,:,0,0] =  sx  # +x
+        local[:,:,1,0] = -sx  # -x
+        local[:,:,2,1] =  sy  # +y
+        local[:,:,3,1] = -sy  # -y
+        local[:,:,4,2] =  sz  # +z
+        local[:,:,5,2] = -sz  # -z
 
         # rotate
         poles_world = torch.matmul(
