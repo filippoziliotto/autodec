@@ -125,12 +125,12 @@ class BatchSuperQMulti(nn.Module):
             new_s = s.clone()
             
             if mask_swap_xz.any():
-                new_s[mask_swap_xz, 0] = sz[mask_swap_xz]
-                new_s[mask_swap_xz, 2] = sx[mask_swap_xz]
+                new_s[..., 0][mask_swap_xz] = sz[mask_swap_xz]
+                new_s[..., 2][mask_swap_xz] = sx[mask_swap_xz]
                 
             if mask_swap_yz.any():
-                new_s[mask_swap_yz, 1] = sz[mask_swap_yz]
-                new_s[mask_swap_yz, 2] = sy[mask_swap_yz]
+                new_s[..., 1][mask_swap_yz] = sz[mask_swap_yz]
+                new_s[..., 2][mask_swap_yz] = sy[mask_swap_yz]
 
             self.raw_scale.data = torch.log(torch.clamp(new_s - self.minS, min=1e-6))
             
