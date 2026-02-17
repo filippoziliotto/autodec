@@ -4,7 +4,6 @@ import numpy as np
 import colorsys
 import torch
 from plyfile import (PlyData, PlyElement)
-import open3d as o3d
 
 def generate_ncolors(num):
     def get_n_hls_colors(num):
@@ -48,8 +47,8 @@ def export_segmentation_pc(pc, assign_matrix, filename):
 def export_mesh_trimesh(mesh, filename):
     mesh.export(filename)
 
-def export_o3d_pc(pc, filename):
-    o3d.io.write_point_cloud(filename, pc)
+# def export_o3d_pc(pc, filename):
+#     o3d.io.write_point_cloud(filename, pc)
 
 def export_mesh(vertices, faces_idx, vertex_color, face_color, filename):
     if vertex_color is not None:
