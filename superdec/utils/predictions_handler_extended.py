@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from typing import Dict
 import trimesh
-import open3d as o3d
 
 from superdec.utils.visualizations import generate_ncolors
 from superdec.utils.transforms import transform_to_primitive_frame
@@ -21,6 +20,11 @@ def extend_dict(outdict):
     if 'bending' not in outdict or outdict['bending'].shape[-1] != 6: 
         outdict['bending'] = cls.zeros((B, N, 6))
     return outdict
+
+class PointCloud:
+    def __init__(self, points, colors):
+        self.points = points
+        self.colors = colors
 
 class PredictionHandler:
     def __init__(self, predictions: Dict[str, np.ndarray]):
@@ -108,10 +112,10 @@ class PredictionHandler:
         colors = generate_ncolors(P)
         colored_pc = colors[segmentation]
 
-        pc_o3d = o3d.geometry.PointCloud()
-        pc_o3d.points = o3d.utility.Vector3dVector(self.pc[index])
-        pc_o3d.colors = o3d.utility.Vector3dVector(colored_pc / 255.0)
-        return pc_o3d
+        points = self.pc[index]
+        colors = colored_pc / 255.0
+        pc_obj = PointCloud(points=points, colors=colors)
+        return pc_obj
     
     def get_segmented_pcs(self):
         pcs = []

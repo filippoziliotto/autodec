@@ -39,6 +39,8 @@ def main(cfg: DictConfig):
 
     model = build_model(cfg).to(device)
     # Resume from checkpoint if specified
+    optimizer = build_optimizer(cfg, model)
+    scheduler = build_scheduler(cfg, optimizer, len(dataloaders['train'])) # None if disabled
     start_epoch = 0
     best_val_loss = float('inf')
     checkpoint_path = getattr(cfg.checkpoints, 'resume_from', None)
@@ -57,8 +59,6 @@ def main(cfg: DictConfig):
 
     dataloaders, train_sampler = build_dataloaders(cfg, is_distributed=is_distributed)
 
-    optimizer = build_optimizer(cfg, model)
-    scheduler = build_scheduler(cfg, optimizer, len(dataloaders['train'])) # None if disabled
     loss_fn = build_loss(cfg).to(device)
 
     

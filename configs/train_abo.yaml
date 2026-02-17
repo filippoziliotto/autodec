@@ -8,8 +8,8 @@ dataset: abo
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/shapenet/ckpt.pt
-  keep_epoch: False
+  resume_from: checkpoints/abo/epoch_500.pt
+  keep_epoch: True
 
 superdec:
   decoder:
@@ -81,7 +81,7 @@ scheduler:
 
 loss:
   type: original
-  w_sps: 0.1 #0.6 
+  w_sps: 0.6 
   w_ext: 0.01 #0.01 
   
   # Original
