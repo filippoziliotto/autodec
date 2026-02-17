@@ -38,11 +38,13 @@ def main(cfg: DictConfig):
         )
 
     model = build_model(cfg).to(device)
-    # Resume from checkpoint if specified
+    dataloaders, train_sampler = build_dataloaders(cfg, is_distributed=is_distributed)
     optimizer = build_optimizer(cfg, model)
     scheduler = build_scheduler(cfg, optimizer, len(dataloaders['train'])) # None if disabled
     start_epoch = 0
     best_val_loss = float('inf')
+    
+    # Resume from checkpoint if specified
     checkpoint_path = getattr(cfg.checkpoints, 'resume_from', None)
     if checkpoint_path is not None:
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -57,7 +59,6 @@ def main(cfg: DictConfig):
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=False)
 
-    dataloaders, train_sampler = build_dataloaders(cfg, is_distributed=is_distributed)
 
     loss_fn = build_loss(cfg).to(device)
 
