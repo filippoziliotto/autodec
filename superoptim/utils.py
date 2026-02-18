@@ -2,6 +2,17 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import time 
+
+def timing(f):
+    def wrap(*args, **kwargs):
+        time1 = time.time()
+        ret = f(*args, **kwargs)
+        time2 = time.time()
+        print('{:s} function took {:.3f} ms'.format(f.__name__, (time2-time1)*1000.0))
+
+        return ret
+    return wrap
 
 def sdf_superquadric(points, scale_vec, exponents, translation, rotation_matrix, truncation=1):
     """
@@ -84,12 +95,12 @@ def plot_sdf_multi_slice(y_world, limit, scale, exp, trans, rot, filename="super
     plt.close()
     print(f"Plot saved as {filename}")
 
-def plot_pred_handler(pred_handler, truncation, wolrd_y=0.15, filename="superq_plot.png"):
-    mask = (pred_handler.exist > 0.5).reshape(-1)
-    sqscale = np.array(pred_handler.scale.reshape(-1, 3)[mask])
-    exponents = np.array(pred_handler.exponents.reshape(-1, 2)[mask])
-    translation = np.array(pred_handler.translation.reshape(-1, 3)[mask])
-    rotation = np.array(pred_handler.rotation.reshape(-1, 3, 3)[mask])
+def plot_pred_handler(pred_handler, truncation, wolrd_y=0.15, idx=0, filename="superq_plot.png"):
+    mask = (pred_handler.exist[idx] > 0.5).reshape(-1)
+    sqscale = np.array(pred_handler.scale[idx].reshape(-1, 3)[mask])
+    exponents = np.array(pred_handler.exponents[idx].reshape(-1, 2)[mask])
+    translation = np.array(pred_handler.translation[idx].reshape(-1, 3)[mask])
+    rotation = np.array(pred_handler.rotation[idx].reshape(-1, 3, 3)[mask])
     plot_sdf_multi_slice(wolrd_y, truncation, sqscale, exponents, translation, rotation, filename=filename)
 
 # https://behavior.stanford.edu/reference/utils/transform_utils.html#utils.transform_utils.mat2quat
