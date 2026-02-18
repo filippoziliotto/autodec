@@ -13,7 +13,7 @@ from typing import Optional, assert_never
 from dataclasses import dataclass
 import gc
 
-from ..utils import quat2mat, mat2quat
+from ..utils import quat2mat, mat2quat, timing
 from superdec.utils.safe_operations import safe_pow, safe_mul
 from superdec.utils.predictions_handler_extended import PredictionHandler
 
@@ -312,10 +312,8 @@ class BatchSuperQMulti(nn.Module):
         poles_world = poles_world + t.unsqueeze(2)
         return poles_world
     
-    def compute_losses(self, forward_out):
-        sdfs = forward_out.get('sdfs')
-        overlap = forward_out.get('overlap')
-
+    @torch.compile
+    def _compute_losses(self, sdfs, overlap):
         temperature = 1e-3
         sdfs_iou = sdfs[:, :self.M_points_iou]
         pred_occ = torch.sigmoid(-sdfs_iou / temperature)
@@ -342,8 +340,14 @@ class BatchSuperQMulti(nn.Module):
         L_overlap = 1e-1 * overlap.mean(dim=1)
         
         loss = -torch.log(iou) + Lsdf + L_bbox + L_overlap
-        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_overlap, "overlap": L_overlap}
+        return loss, iou, Lsdf, L_overlap, L_overlap
     
+    def compute_losses(self, forward_out):
+        sdfs = forward_out.get('sdfs')
+        overlap = forward_out.get('overlap')
+        loss, iou, Lsdf, L_overlap, L_overlap = self._compute_losses(sdfs, overlap)
+        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_overlap, "overlap": L_overlap}
+
     def forward(self):
         all_sdfs = self.sdf_batch(self.points.transpose(1, 2).contiguous()) # (B, N, M_total)
     
@@ -396,7 +400,8 @@ class BatchSuperQMulti(nn.Module):
             self.pred_handler.bending[idx][mask] = combined[mask].detach().cpu().numpy()
             
         if compute_meshes:
-            return self.pred_handler, self.pred_handler.get_meshes(resolution=30)
+            meshes = [self.pred_handler.get_mesh(idx, resolution=30) for idx in self.indices]
+            return self.pred_handler, meshes
         else:
             return self.pred_handler
 

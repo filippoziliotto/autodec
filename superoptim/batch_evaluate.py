@@ -83,7 +83,7 @@ def main():
     
     # Store per-object metrics for ranking
     object_metrics = [] # List of tuples: (index, name, chamfer_l1)
-    batch_size = 96
+    batch_size = 64
     
     for i in tqdm(range(0, len(valid_objs), batch_size), desc="Processing batches"):
         batch_objs = valid_objs[i : i + batch_size]

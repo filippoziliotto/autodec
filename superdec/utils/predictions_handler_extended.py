@@ -175,18 +175,53 @@ class PredictionHandler:
                 
         return mesh
 
+    def apply_bending_axis(self, x, y, z, val_kb, val_alpha, axis):
+        if np.abs(val_kb) < 1e-3: return x, y, z
+        
+        if axis == 'z':
+            u, v_coord, w = x, y, z
+        elif axis == 'x':
+            u, v_coord, w = y, z, x
+        elif axis == 'y':
+            u, v_coord, w = z, x, y
+        
+        # Precompute constants
+        inv_kb = 1.0 / val_kb
+        sin_alpha = np.sin(val_alpha)
+        cos_alpha = np.cos(val_alpha)
+        
+        beta = np.arctan2(v_coord, u)
+        r = np.sqrt(u**2 + v_coord**2) * np.cos(val_alpha - beta)
+        gamma = w * val_kb
+        rho = inv_kb - r        
+        R = inv_kb - rho * np.cos(gamma)
+
+        expr = (R - r)
+        u = u + expr * cos_alpha
+        v_coord = v_coord + expr * sin_alpha
+        w = rho * np.sin(gamma)
+        
+        if axis == 'z':
+            return u, v_coord, w
+        elif axis == 'x':
+            return w, u, v_coord
+        elif axis == 'y':
+            return v_coord, w, u
+
     def _superquadric_mesh(self, scale, exponents, rotation, translation, tapering, bending, N):
         def f(o, m):
-                return np.sign(np.sin(o)) * np.abs(np.sin(o))**m
+            sin_o = np.sin(o)
+            return np.sign(sin_o) * np.abs(sin_o)**m
         def g(o, m):
-            return np.sign(np.cos(o)) * np.abs(np.cos(o))**m
+            cos_o = np.cos(o)
+            return np.sign(cos_o) * np.abs(cos_o)**m
+
         u = np.linspace(-np.pi, np.pi, N, endpoint=True)
         v = np.linspace(-np.pi/2.0, np.pi/2.0, N, endpoint=True)
         u = np.tile(u, N)
         v = (np.repeat(v, N))
         if np.linalg.det(rotation) < 0:
             u = u[::-1]
-        triangles = []
 
         x = scale[0] * g(v, exponents[0]) * g(u, exponents[1])
         y = scale[1] * g(v, exponents[0]) * f(u, exponents[1])
@@ -196,59 +231,57 @@ class PredictionHandler:
         x[-N:] = 0.0
 
         kx, ky = tapering
-        fx = kx/scale[2] * z + 1
-        fy = ky/scale[2] * z + 1
+        z_norm = z / scale[2]
+        fx = kx * z_norm + 1
+        fy = ky * z_norm + 1
         x = x*fx
         y = y*fy
 
         # Apply bending transformation
-        def apply_bending_axis(x, y, z, val_kb, val_alpha, axis):
-            if val_kb < 1e-3: return x, y, z
-            
-            if axis == 'z':
-                u, v, w = x, y, z
-            elif axis == 'x':
-                u, v, w = y, z, x
-            elif axis == 'y':
-                u, v, w = z, x, y
-            
-            beta = np.arctan2(v, u)
-            r = np.sqrt(u**2 + v**2) * np.cos(val_alpha - beta)
-            gamma = w * val_kb
-            rho = (1.0 / val_kb) - r        
-            R = (1.0 / val_kb) - rho * np.cos(gamma)
+        x, y, z = self.apply_bending_axis(x, y, z, bending[4], bending[5], 'y')
+        x, y, z = self.apply_bending_axis(x, y, z, bending[2], bending[3], 'x')
+        x, y, z = self.apply_bending_axis(x, y, z, bending[0], bending[1], 'z')
 
-            u = u + (R - r)*np.cos(val_alpha)
-            v = v + (R - r)*np.sin(val_alpha)
-            w = rho * np.sin(gamma)
-            
-            if axis == 'z':
-                return u, v, w
-            elif axis == 'x':
-                return w, u, v
-            elif axis == 'y':
-                return v, w, u
+        vertices = np.stack([x, y, z], axis=1) # Faster than concatenate expand_dims
+        vertices = (rotation @ vertices.T).T + translation  
 
-        x, y, z = apply_bending_axis(x, y, z, bending[4], bending[5], 'y')
-        x, y, z = apply_bending_axis(x, y, z, bending[2], bending[3], 'x')
-        x, y, z = apply_bending_axis(x, y, z, bending[0], bending[1], 'z')
+        # Create a grid of indices for the top-left corner of each quad
+        i = np.arange(N - 1)
+        j = np.arange(N - 1)
+        J, I = np.meshgrid(j, i)
+        
+        # Indices for the quad vertices
+        # p1: (i, j)     -> I*N + J
+        # p2: (i, j+1)   -> I*N + (J+1)
+        # p3: (i+1, j)   -> (I+1)*N + J
+        # p4: (i+1, j+1) -> (I+1)*N + (J+1)
+        p1 = I * N + J
+        p2 = I * N + (J + 1)
+        p3 = (I + 1) * N + J
+        p4 = (I + 1) * N + (J + 1)
+        t1 = np.stack([p1, p2, p3], axis=-1).reshape(-1, 3)
+        t2 = np.stack([p3, p2, p4], axis=-1).reshape(-1, 3)        
+        main_body_triangles = np.concatenate([t1, t2], axis=0)
 
-        vertices =  np.concatenate([np.expand_dims(x, 1),
-                                    np.expand_dims(y, 1),
-                                    np.expand_dims(z, 1)], axis=1)
-        vertices =  (rotation @ vertices.T).T + translation  
+        # Seam connection (wrapping u around): Connect last column to first column
+        # Last vertex in row i: i*N + (N-1)
+        # First vertex in row i: i*N
+        # Last vertex in row i+1: (i+1)*N + (N-1)
+        # First vertex in row i+1: (i+1)*N
+        i_seam = np.arange(N - 1)
+        p1_s = i_seam * N + (N - 1)
+        p2_s = i_seam * N
+        p3_s = (i_seam + 1) * N + (N - 1)
+        p4_s = (i_seam + 1) * N
+        t1_s = np.stack([p1_s, p2_s, p3_s], axis=-1)
+        t2_s = np.stack([p3_s, p2_s, p4_s], axis=-1)
+        seam_triangles = np.concatenate([t1_s, t2_s], axis=0)
+        
+        # Pole caps
+        cap_triangles = np.array([
+            [(N-1)*N+(N-1), (N-1)*N, (N-1)],
+            [(N-1), (N-1)*N, 0]
+        ])
 
-        triangles = []
-        for i in range(N-1):
-            for j in range(N-1):
-                triangles.append([i*N+j, i*N+j+1, (i+1)*N+j])
-                triangles.append([(i+1)*N+j, i*N+j+1, (i+1)*N+(j+1)])
-        # Connect first and last vertex in each row
-        for i in range(N - 1):
-            triangles.append([i * N + (N - 1), i * N, (i + 1) * N + (N - 1)])
-            triangles.append([(i + 1) * N + (N - 1), i * N, (i + 1) * N])
-
-        triangles.append([(N-1)*N+(N-1), (N-1)*N, (N-1)])
-        triangles.append([(N-1), (N-1)*N, 0])
-
+        triangles = np.concatenate([main_body_triangles, seam_triangles, cap_triangles], axis=0)
         return np.array(vertices), np.array(triangles)
