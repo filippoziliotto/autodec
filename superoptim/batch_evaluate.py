@@ -154,23 +154,26 @@ def main():
 
         # Compute IoU using SDF
         # Load points.npz
-        points_iou_list = []
-        occ_tgt_list = []
-        for idx_in_batch, (idx, category_path) in enumerate(batch_objs):
-            obj_name = pred_handler.names[idx]
-            points_file = os.path.join(category_path, obj_name, "points.npz")
-            
-            points_dict = np.load(points_file)
-            pts = points_dict['points']
-            occ = points_dict['occupancies']
-            if np.issubdtype(occ.dtype, np.uint8):
-                occ = np.unpackbits(occ)[:pts.shape[0]]
-            
-            points_iou_list.append(pts)
-            occ_tgt_list.append(occ)
-
-        all_points_t = torch.tensor(np.stack(points_iou_list), dtype=torch.float, device=device).transpose(1, 2)
-        all_occ_t = torch.tensor(np.stack(occ_tgt_list), dtype=torch.bool, device=device)
+        if hasattr(superq, 'points') and hasattr(superq, 'occupancies') and hasattr(superq, 'M_points_iou'):
+            all_points_t = superq.points[:, :superq.M_points_iou, :].transpose(1, 2)
+            all_occ_t = superq.occupancies
+        else:
+            points_iou_list = []
+            occ_tgt_list = []
+            for idx_in_batch, (idx, category_path) in enumerate(batch_objs):
+                obj_name = pred_handler.names[idx]
+                points_file = os.path.join(category_path, obj_name, "points.npz")
+                
+                points_dict = np.load(points_file)
+                pts = points_dict['points']
+                occ = points_dict['occupancies']
+                if np.issubdtype(occ.dtype, np.uint8):
+                    occ = np.unpackbits(occ)[:pts.shape[0]]
+                
+                points_iou_list.append(pts)
+                occ_tgt_list.append(occ)
+            all_points_t = torch.tensor(np.stack(points_iou_list), dtype=torch.float, device=device).transpose(1, 2)
+            all_occ_t = torch.tensor(np.stack(occ_tgt_list), dtype=torch.bool, device=device)
 
         with torch.no_grad():
             sdfs = superq.sdf_batch(all_points_t) # (B, N, M)
