@@ -6,7 +6,6 @@ from omegaconf import OmegaConf
 from superdec.superdec import SuperDec
 from superdec.utils.predictions_handler_extended import PredictionHandler
 from superdec.data.dataloader import denormalize_outdict, denormalize_points
-import open3d as o3d
 import viser
 import random
 from superdec.data.dataloader import normalize_points, denormalize_outdict

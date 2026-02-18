@@ -137,20 +137,16 @@ class BatchSuperQMulti(nn.Module):
             new_R = R.clone()
 
             if mask_swap_xz.any():
-                u = R[mask_swap_xz, :, 0]
-                v = R[mask_swap_xz, :, 1]
-                w = R[mask_swap_xz, :, 2]
-                new_R[mask_swap_xz, :, 0] = -w
-                new_R[mask_swap_xz, :, 1] = v
-                new_R[mask_swap_xz, :, 2] = u
+                u, v, w = R.unbind(-1) # Splits (B, N, 3, 3) into three (B, N, 3) tensors
+                new_u = torch.where(mask_swap_xz.unsqueeze(-1), -w, u)
+                new_w = torch.where(mask_swap_xz.unsqueeze(-1), u, w)
+                new_R = torch.stack([new_u, v, new_w], dim=-1)
 
             if mask_swap_yz.any():
-                u = R[mask_swap_yz, :, 0]
-                v = R[mask_swap_yz, :, 1]
-                w = R[mask_swap_yz, :, 2]
-                new_R[mask_swap_yz, :, 0] = u
-                new_R[mask_swap_yz, :, 1] = -w
-                new_R[mask_swap_yz, :, 2] = v
+                u, v, w = new_R.unbind(-1) # Splits (B, N, 3, 3) into three (B, N, 3) tensors
+                new_v = torch.where(mask_swap_yz.unsqueeze(-1), -w, v)
+                new_w = torch.where(mask_swap_yz.unsqueeze(-1), v, w)
+                new_R = torch.stack([u, new_v, new_w], dim=-1)
 
             self.raw_rotation.data = mat2quat(new_R)
 
