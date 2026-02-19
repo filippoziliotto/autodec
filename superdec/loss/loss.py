@@ -182,11 +182,19 @@ class SuperDecLoss(BaseLoss):
         loss_dict['all'] = loss.item()
         return loss, loss_dict
 
-class ParamLoss(BaseLoss):
+class ParamLoss(SuperDecLoss):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.w_param = getattr(cfg, 'w_param', 1.0)
+        self.w_param_decay = getattr(cfg, 'w_param_decay', 1.0)
+        self.min_w_param = getattr(cfg, 'min_w_param', 0.0)
+        self.initial_w_param = self.w_param
 
+    def step(self, epoch):
+        """Update w_param based on the current epoch."""
+        decay_factor = self.w_param_decay ** epoch
+        self.w_param = max(self.min_w_param, self.initial_w_param * decay_factor)
+    
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
         gt_shape = batch['gt_shape'].cuda().float()
@@ -202,30 +210,32 @@ class ParamLoss(BaseLoss):
         scale_loss = nn.MSELoss(reduction='none')(out_dict['scale'], gt_scale) # [B, P, 3]
         scale_loss = (scale_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
         loss += scale_loss
-        loss_dict['param_scale'] = scale_loss.item()
+        # loss_dict['param_scale'] = scale_loss.item()
         
         # Shape
         shape_loss = nn.MSELoss(reduction='none')(out_dict['shape'], gt_shape) # [B, P, 2]
         shape_loss = (shape_loss * mask).sum() / (mask.sum() * 2 + 1e-6)
         loss += shape_loss
-        loss_dict['param_shape'] = shape_loss.item()
+        # loss_dict['param_shape'] = shape_loss.item()
         
         # Translation
         trans_loss = nn.MSELoss(reduction='none')(out_dict['trans'], gt_trans) # [B, P, 3]
         trans_loss = (trans_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
         loss += trans_loss
-        loss_dict['param_trans'] = trans_loss.item()
+        # loss_dict['param_trans'] = trans_loss.item()
         
         # Rotation
         rot_loss = nn.MSELoss(reduction='none')(out_dict['rotate'], gt_rotate) # [B, P, 3, 3]
         rot_loss = (rot_loss * mask.unsqueeze(-1)).sum() / (mask.sum() * 9 + 1e-6)
         loss += rot_loss
-        loss_dict['param_rot'] = rot_loss.item()
+        # loss_dict['param_rot'] = rot_loss.item()
         
         total_loss = self.w_param * loss
         loss_dict['param_loss'] = loss.item()
         
-        total_loss += self.compute_common_losses(out_dict, loss_dict)
+        base_loss, base_dict = super().forward(batch, out_dict)
+        loss_dict.update(base_dict)
+        total_loss += base_loss
         loss_dict['all'] = total_loss.item()
         return total_loss, loss_dict
 
@@ -236,6 +246,7 @@ class IoULoss(BaseLoss):
         self.w_iou = getattr(cfg, 'w_iou', 1.0)
         self.w_sdf = getattr(cfg, 'w_sdf', 1.0)
         self.w_bbox = getattr(cfg, 'w_bbox', 1.0)
+        self.w_overlap = getattr(cfg, 'w_overlap', 1.0)
     
     def poles(self, scale, rotate, trans):
         B, N, _ = scale.shape
@@ -325,40 +336,30 @@ class IoULoss(BaseLoss):
         
         # 1. SDF on Surface Points
         all_sdfs_surf = self.sdf_batch(pc, out_dict) #(B, N, M_surf)
+        exist_probs = out_dict['exist'].reshape(all_sdfs_surf.shape[0], all_sdfs_surf.shape[1]) # (B, N)
+        exist_weights = exist_probs.unsqueeze(-1) # (B, N, 1)
+        assign_probs = out_dict['assign_matrix'].transpose(1, 2) #(B, N, M_surf)
         
-        # Mask out non-existing primitives
-        exist_mask = (out_dict['exist'] > 0.5).reshape(all_sdfs_surf.shape[0], all_sdfs_surf.shape[1]) # (B, N)
-        mask = exist_mask.unsqueeze(-1).expand_as(all_sdfs_surf)
-        all_sdfs_surf[~mask] = float('inf') # So they don't contribute to min
-        
-        # Union SDF (min)
-        tau = 0.01
-        min_sdf_surf = -tau * torch.logsumexp(-all_sdfs_surf / tau, dim=1) # (B, M_surf)
-        
-        # SDF Loss (surface points should have SDF=0)
-        # Using truncated SDF logic from batch_superq
         temperature = 1e-2
-        sdfs_surf_trunc = (torch.sigmoid(min_sdf_surf / temperature) - 0.5) * 2 * self.truncation
-        # Since we want SDF=0, we minimize abs(sdf)
-        L_sdf = 8 * torch.mean(torch.abs(sdfs_surf_trunc))
+        sdfs_surf_trunc = (torch.sigmoid(all_sdfs_surf / temperature) - 0.5) * 2 * self.truncation
+        relu_sdfs_trunc = torch.nn.LeakyReLU()(sdfs_surf_trunc)
+        weighted_relu_sdf = (assign_probs * relu_sdfs_trunc).sum(dim=1)
+        L_sdf = 16 * weighted_relu_sdf.mean()
+
         loss += self.w_sdf * L_sdf
         loss_dict['sdf'] = L_sdf.item()
         
         # 2. BBox Loss
-        # Compute bbox from PC
         bbox_min = torch.min(pc, dim=1).values.unsqueeze(1).unsqueeze(2) # (B, 1, 1, 3)
         bbox_max = torch.max(pc, dim=1).values.unsqueeze(1).unsqueeze(2)
-        # Add margin as in batch_superq
         margin = (bbox_max - bbox_min) * .025
         bbox_min -= margin
         bbox_max += margin
         
         poles = self.poles(out_dict['scale'], out_dict['rotate'], out_dict['trans']) # (B, N, 6, 3)
-        mask_bbox = exist_mask.unsqueeze(-1) # (B, N, 1)
-        
         violation = torch.relu(bbox_min - poles) + torch.relu(poles - bbox_max) # (B, N, 6, 3)
         dist = torch.linalg.norm(violation, dim=-1) # (B, N, 6)
-        L_bbox = (dist * mask_bbox).sum(dim=2).mean() # Mean over batch
+        L_bbox = (dist * exist_weights).sum(dim=2).mean() # Mean over batch
         
         loss += self.w_bbox * L_bbox
         loss_dict['bbox'] = L_bbox.item()
@@ -366,24 +367,33 @@ class IoULoss(BaseLoss):
         # 3. IoU Loss
         all_sdfs_iou = self.sdf_batch(points_iou, out_dict) # (B, N, M_iou)
         
-        # Mask
-        mask_iou = exist_mask.unsqueeze(-1).expand_as(all_sdfs_iou)
-        all_sdfs_iou[~mask_iou] = float('inf')
-        
-        # Min SDF
-        min_sdf_iou = -tau * torch.logsumexp(-all_sdfs_iou / tau, dim=1) # (B, M_iou)
-        
         temperature_iou = 1e-3
-        pred_occ = torch.sigmoid(-min_sdf_iou / temperature_iou)
+        prob_prim = torch.sigmoid(-all_sdfs_iou / temperature_iou)
+        p_occupied = exist_weights * prob_prim # (B, N, M_iou)
         
+        # Union probability: P(union) = 1 - prod(1 - p_i)
+        # implementation: 1 - exp(sum(log(1 - p_i)))
+        # clamp p_occupied to max 1-eps to avoid log(0)
+        p_occupied = torch.clamp(p_occupied, min=0.0, max=0.9999)
+        pred_occ = 1.0 - torch.exp(torch.sum(torch.log(1.0 - p_occupied), dim=1)) # (B, M_iou)
         intersection = (pred_occ * gt_occ).sum(dim=1)
         union = (pred_occ + gt_occ - pred_occ * gt_occ).sum(dim=1)
         iou = intersection / torch.clamp(union, min=1.0)
-        
         L_iou = -torch.log(iou).mean()
+        
         loss += self.w_iou * L_iou
         loss_dict['iou'] = iou.mean().item()
         loss_dict['iou_loss'] = L_iou.item()
+
+        # 4. Overlap/Regularization Loss
+        temperature_overlap = 1e-3
+        indicator = torch.sigmoid(-(all_sdfs_iou + self.truncation) / temperature_overlap)
+        weighted_indicator = exist_weights * indicator # (B, N, M)
+        overlap_count = torch.sum(weighted_indicator, dim=1) # (B, M)
+        L_overlap = 1e-1 * overlap_count.mean()
+        
+        loss += self.w_overlap * L_overlap
+        loss_dict['overlap'] = L_overlap.item()
 
         loss += self.compute_common_losses(out_dict, loss_dict)
         loss_dict['all'] = loss.item()
