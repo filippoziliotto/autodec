@@ -12,6 +12,7 @@ checkpoints:
   keep_epoch: False
 
 superdec:
+  extended: true
   decoder:
     n_queries: 16
     n_layers: 3 # number of transformer decoders
@@ -56,7 +57,7 @@ superdec:
 
 abo:
   path: data/ABO/processed-complete
-  normalize: False
+  normalize: True
 
 trainer:
   save_path: checkpoints
@@ -81,18 +82,7 @@ scheduler:
 
 loss:
   type: param
-  w_sps: 0.9
-  w_ext: 0.01 #0.01 
-  
-  # Original
-  n_samples: 500
-  w_cub: 1.0 #1.0 
-  w_cd: 1.0
-  
-  # Param
-  w_param: 0.01
-  w_param_decay: 0.99  # Added decay parameter
-  min_w_param: 0.001   # Added minimum parameter
+  w_param: 1.0
   gt_train_path: data/output_npz/abo_sps_0.9/abo_train_optimized_iou_bend.npz
   gt_val_path: data/output_npz/abo_sps_0.9/abo_train_optimized_iou_bend.npz
   

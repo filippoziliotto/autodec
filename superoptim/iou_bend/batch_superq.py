@@ -25,6 +25,7 @@ class BatchSuperQMulti(nn.Module):
         ply_paths: list[str] = None,
         truncation: float = 0.05,
         device: str = "cuda",
+        external_data: dict = None
     ):
         super().__init__()
         self.indices = indices
@@ -68,17 +69,23 @@ class BatchSuperQMulti(nn.Module):
             
             # --- Points ---
             try:
-                ply = ply_paths[i] if ply_paths else None
-                points_file = ply.replace("pointcloud.npz", "points.npz")
-                points_dict = np.load(points_file)
-                points_iou = points_dict['points']
-                occ_tgt = points_dict['occupancies']
-                if np.issubdtype(occ_tgt.dtype, np.uint8):
-                    occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
-                occ = torch.tensor(occ_tgt, dtype=torch.bool, device=device)
-                pts_iou = torch.tensor(points_iou, dtype=torch.float, device=device)
-                pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
-                pts = torch.cat([pts_iou, pts_surf], dim=0)
+                if external_data is not None:
+                     pts_iou = external_data['points_iou'][i]
+                     occ = external_data['occupancies'][i]
+                     pts_surf = external_data['points'][i] # This is 4096 surface points
+                     pts = torch.cat([pts_iou, pts_surf], dim=0)
+                else:
+                    ply = ply_paths[i] if ply_paths else None
+                    points_file = ply.replace("pointcloud.npz", "points.npz")
+                    points_dict = np.load(points_file)
+                    points_iou = points_dict['points']
+                    occ_tgt = points_dict['occupancies']
+                    if np.issubdtype(occ_tgt.dtype, np.uint8):
+                        occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
+                    occ = torch.tensor(occ_tgt, dtype=torch.bool, device=device)
+                    pts_iou = torch.tensor(points_iou, dtype=torch.float, device=device)
+                    pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
+                    pts = torch.cat([pts_iou, pts_surf], dim=0)
             except Exception as e:
                 print(f"Error loading {points_file}: {e}")
                 exit()
@@ -99,6 +106,8 @@ class BatchSuperQMulti(nn.Module):
         raw_bending = torch.full((B, self.N_max, 6), 1e-3, dtype=torch.float, device=device)
         raw_bending[..., 0::2] = torch.logit(raw_bending[..., 0::2])
         self.raw_bending = nn.Parameter(raw_bending) # (B, N, 6)
+        self.normalize()
+        self.reorient()
         
         self.exist_mask = torch.stack(self.masks) # (B, N)
         self.bbox_min = torch.min(self.points[:, self.M_points_iou:], dim=1).values.unsqueeze(1).unsqueeze(2)  # (B,3)
@@ -106,8 +115,27 @@ class BatchSuperQMulti(nn.Module):
         self.bbox_min -= (self.bbox_max - self.bbox_min) * .025
         self.bbox_max += (self.bbox_max - self.bbox_min) * .025
 
-        self.reorient()
+    @torch.compile
+    def normalize(self):
+        # normalize based on surface points
+        surf_points = self.points[:, -self.M_points_surf:]
+        translation = torch.mean(surf_points, dim=1)  # (B,3)
+        self.points = self.points - translation.unsqueeze(1)
 
+        scale = 2 * torch.amax(torch.abs(surf_points), dim=(1, 2))  # (B,)
+        self.points = self.points / scale.view(-1, 1, 1)
+
+        self.normalization_translation = translation
+        self.normalization_scale = scale
+
+        with torch.no_grad():
+            self.translation.data = (self.translation.data - translation.unsqueeze(1)) / scale.view(-1, 1, 1)
+            # Update raw_scale so that scale() reflects the normalization
+            new_s = self.scale() / scale.view(-1, 1, 1)
+            self.raw_scale.data = torch.log(torch.clamp(new_s - self.minS, min=1e-6))
+        
+        return translation, scale
+    
     @torch.compile
     def reorient(self):
         with torch.no_grad():
@@ -375,7 +403,7 @@ class BatchSuperQMulti(nn.Module):
             counts_points[b] = torch.bincount(idx_points[b], minlength=self.N_max).float()
         return (counts_points <= 5) & self.exist_mask
 
-    def update_handler(self, compute_meshes=True):
+    def update_handler(self, denormalize=True, compute_meshes=True):
         # prune_mask = self.prune()
         # self.exist_mask &= ~prune_mask
         # prune_mask = prune_mask.cpu()
@@ -384,11 +412,20 @@ class BatchSuperQMulti(nn.Module):
             mask = self.exist_mask[i].cpu().numpy()
             if not np.any(mask): continue
             
-            self.pred_handler.scale[idx][mask] = self.scale()[i][mask].detach().cpu().numpy()
+            # Denormalize
+            s = self.scale()[i][mask].detach().cpu().numpy()
+            t = self.translation[i][mask].detach().cpu().numpy()
+            if denormalize:
+                norm_trans = self.normalization_translation[i].detach().cpu().numpy()
+                norm_scale = self.normalization_scale[i].detach().cpu().numpy()
+                s = s * norm_scale
+                t = (t * norm_scale) + norm_trans
+
+            self.pred_handler.scale[idx][mask] = s
+            self.pred_handler.translation[idx][mask] = t
             self.pred_handler.exponents[idx][mask] = self.exponents()[i][mask].detach().cpu().numpy()
             self.pred_handler.tapering[idx][mask] = self.tapering()[i][mask].detach().cpu().numpy()
             self.pred_handler.rotation[idx][mask] = self.rotation()[i][mask].detach().cpu().numpy()
-            self.pred_handler.translation[idx][mask] = self.translation[i][mask].detach().cpu().numpy()
 
             kb, alpa = self.bending()
             # Interleave kb and alpha to match the 6-param layout: kb_z, alpha_z, kb_x, alpha_x, kb_y, alpha_y

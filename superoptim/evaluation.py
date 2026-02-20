@@ -2,17 +2,22 @@ import torch.nn as nn
 import trimesh
 import numpy as np
 from scipy.spatial import KDTree
-from superdec.data.dataloader import ShapeNet, ScenesDataset
-from torch.utils.data import DataLoader
+from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO
+from torch.utils.data import DataLoader, Subset
 
 def build_dataloader(cfg):
     if cfg.dataloader.dataset == 'shapenet':
         ds = ShapeNet(split=cfg.shapenet.split, cfg=cfg)
+    elif cfg.dataloader.dataset == 'abo':
+        ds = ABO(split=cfg.abo.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'scenes_dataset':
         ds = ScenesDataset(cfg=cfg)
     else:
         raise ValueError(f"Unsupported dataset {cfg.dataloader.dataset}")
 
+    return _build_dataloader(cfg, ds)
+
+def _build_dataloader(cfg, ds):
     dl = DataLoader(
         ds, batch_size=cfg.dataloader.batch_size, shuffle=False,
         num_workers=cfg.dataloader.num_workers, pin_memory=True

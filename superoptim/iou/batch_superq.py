@@ -25,6 +25,7 @@ class BatchSuperQMulti(nn.Module):
         ply_paths: list[str] = None,
         truncation: float = 0.05,
         device: str = "cuda",
+        external_data: dict = None
     ):
         super().__init__()
         self.indices = indices
@@ -68,23 +69,25 @@ class BatchSuperQMulti(nn.Module):
             
             # --- Points ---
             try:
-                ply = ply_paths[i] if ply_paths else None
-                points_file = ply.replace("pointcloud.npz", "points.npz")
-                points_dict = np.load(points_file)
-                points_iou = points_dict['points']
-                occ_tgt = points_dict['occupancies']
-                if np.issubdtype(occ_tgt.dtype, np.uint8):
-                    occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
-                occ = torch.tensor(occ_tgt, dtype=torch.bool, device=device)
-                pts_iou = torch.tensor(points_iou, dtype=torch.float, device=device)
-                pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
-                # ply = ply.replace("pointcloud.npz", "pointcloud_4096.npz")
-                # pc = np.array(np.load(ply)['points'])
-                # pc_idx = np.random.choice(pc.shape[0], self.M_points_surf, replace=False)
-                # pts_surf = torch.tensor(pc[pc_idx], dtype=torch.float, device=device)
-                pts = torch.cat([pts_iou, pts_surf], dim=0)
+                if external_data is not None:
+                     pts_iou = external_data['points_iou'][i]
+                     occ = external_data['occupancies'][i]
+                     pts_surf = external_data['points'][i] # This is 4096 surface points
+                     pts = torch.cat([pts_iou, pts_surf], dim=0)
+                else:
+                    ply = ply_paths[i] if ply_paths else None
+                    points_file = ply.replace("pointcloud.npz", "points.npz")
+                    points_dict = np.load(points_file)
+                    points_iou = points_dict['points']
+                    occ_tgt = points_dict['occupancies']
+                    if np.issubdtype(occ_tgt.dtype, np.uint8):
+                        occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
+                    occ = torch.tensor(occ_tgt, dtype=torch.bool, device=device)
+                    pts_iou = torch.tensor(points_iou, dtype=torch.float, device=device)
+                    pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
+                    pts = torch.cat([pts_iou, pts_surf], dim=0)
             except Exception as e:
-                print(f"Error loading {points_file}: {e}")
+                print(f"Error loading points: {e}")
                 exit()
             
             # Ensure pts has correct shape if not loaded from ply

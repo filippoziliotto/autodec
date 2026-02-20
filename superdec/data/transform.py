@@ -415,7 +415,11 @@ class PointCloudsTransform(BasicTransform):
             "cameras": self.apply_to_camera,
             "bbox": self.apply_to_bboxes,
             "labels": self.apply_to_labels,
+            "transform_info": self.apply_to_transform_info,
         }
+
+    def apply_to_transform_info(self, transform_info, **params):
+        return transform_info
 
     def apply_to_bboxes(self, bboxes, **params):
         return [self.apply_to_bbox(bbox, **params) for bbox in bboxes]
@@ -477,6 +481,19 @@ class Move3d(PointCloudsTransform):
 
     def apply(self, points, offset, **params):
         return move(points, offset)
+
+    def apply_to_transform_info(self, transform_info, offset, **params):
+        if transform_info is None:
+            return None
+        
+        cur_M = transform_info.get('matrix', np.eye(4))
+        
+        T_offset = np.eye(4)
+        T_offset[:3, 3] = offset
+        
+        transform_info['matrix'] = T_offset @ cur_M
+        
+        return transform_info
 
     def apply_to_normals(self, normals, **params):
         return normals
@@ -634,6 +651,54 @@ class RotateAroundAxis3d(PointCloudsTransform):
 
     def apply(self, points, axis, angle, **params):
         return rotate_around_axis(points, axis, angle, center_point=self.center_point)
+
+    @property
+    def target_dependence(self):
+        return {"transform_info": ["points"]}
+
+    def apply_to_transform_info(self, transform_info, points, axis, angle, center_point, **params):
+        if transform_info is None:
+            return None
+            
+        points = np.asarray(points)
+        orig_shape = points.shape
+        pts = points.reshape(-1, orig_shape[-1])
+        
+        if center_point is None:
+            center_point = pts[:, :3].mean(axis=0)
+
+        # Build 4x4 transform for this rotation around center
+        axis = np.asarray(axis)
+        axis = axis / np.linalg.norm(axis)
+        a = np.cos(angle / 2.0)
+        b, c, d = -axis * np.sin(angle / 2.0)
+        aa, bb, cc, dd = a*a, b*b, c*c, d*d
+        bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
+
+        rot_3x3 = np.array(
+            [
+                [aa + bb - cc - dd, 2 * (bc + ad),     2 * (bd - ac)],
+                [2 * (bc - ad),     aa + cc - bb - dd, 2 * (cd + ab)],
+                [2 * (bd + ac),     2 * (cd - ab),     aa + dd - bb - cc],
+            ]
+        )
+
+        # T_step = T(c) @ R @ T(-c)
+        T_c = np.eye(4)
+        T_c[:3, 3] = center_point
+        
+        T_neg_c = np.eye(4)
+        T_neg_c[:3, 3] = -center_point
+        
+        R_4x4 = np.eye(4)
+        R_4x4[:3, :3] = rot_3x3
+        
+        M_step = T_c @ R_4x4 @ T_neg_c
+        
+        cur_M = transform_info.get('matrix', np.eye(4))
+        transform_info['matrix'] = M_step @ cur_M
+        
+        return transform_info
 
     def apply_to_normals(self, normals, axis, angle, **params):
         return rotate_around_axis(normals, axis, angle, center_point=(0, 0, 0))

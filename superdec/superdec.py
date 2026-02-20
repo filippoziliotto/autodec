@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import warnings
 
 from superdec.models.decoder import TransformerDecoder
 from superdec.models.decoder_layer import DecoderLayer
@@ -34,9 +35,34 @@ class SuperDec(nn.Module):
             nn.ReLU(),
             nn.Linear(self.emb_dims, self.emb_dims),
         )
-        self.heads = SuperDecHead(emb_dims=self.emb_dims)
+        self.heads = SuperDecHead(emb_dims=self.emb_dims, ctx=ctx)
         init_queries = torch.zeros(self.n_queries + 1, self.emb_dims)
         self.register_buffer('init_queries', init_queries) # TODO double check -> new codebase
+
+    def load_state_dict(self, state_dict, strict=True):
+        """Wrapper around nn.Module.load_state_dict that allows older checkpoints
+        missing newly added head parameters (like tapering/bending) while still
+        optionally enforcing strict loading for other keys.
+        """
+        res = super(SuperDec, self).load_state_dict(state_dict, strict=False)
+        missing = list(res.missing_keys)
+        unexpected = list(res.unexpected_keys)
+
+        # Allow missing keys that belong to newly added heads
+        allowed_prefixes = ["heads.tapering_head", "heads.bending_k_head", "heads.bending_a_head"]
+        filtered_missing = [k for k in missing if not any(k.startswith(p) for p in allowed_prefixes)]
+
+        if strict:
+            if filtered_missing or unexpected:
+                msg = ''
+                if filtered_missing:
+                    msg += f"Missing key(s) in state_dict: {filtered_missing}. \n"
+                if unexpected:
+                    msg += f"Unexpected key(s) in state_dict: {unexpected}. \n"
+                raise RuntimeError(msg)
+        else:
+            if missing or unexpected:
+                warnings.warn(f"load_state_dict warnings -- missing: {missing}, unexpected: {unexpected}")
     
     def forward(self, x):
         point_features = self.point_encoder(x)

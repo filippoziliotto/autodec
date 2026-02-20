@@ -52,7 +52,6 @@ def get_transforms(split: str, cfg):
         return None
 
     return Compose([
-        Scale3d(),
         RotateAroundAxis3d(rotation_limit=np.pi / 24, axis=(0, 0, 1)),
         RotateAroundAxis3d(rotation_limit=np.pi / 24, axis=(1, 0, 0)),
         RotateAroundAxis3d(rotation_limit=np.pi, axis=(0, 1, 0)),
@@ -189,15 +188,13 @@ class Scene(Dataset):
 class ObjectDataset(Dataset):
     """Shared helpers for ShapeNet/ABO pointcloud-style datasets."""
     def __init__(self, split: str, cfg):
-        self.gt_params_path = None
+        self.normalize = cfg.normalize
+        self.use_fps = getattr(cfg, 'use_fps', False)
+        self.load_occupancy = getattr(cfg, 'load_occupancy', False)
+        self.gt_params_path = getattr(cfg, f'gt_{split}_path', None)
         self.gt_data, self.gt_mapping = {}, {}
-        self.load_occupancy = False
-        if hasattr(cfg, 'loss') and (split == 'train' or split =='val'):
-            if cfg.loss.type == 'iou':
-                self.load_occupancy = True
-            elif cfg.loss.type == 'param':
-                self.gt_params_path = cfg.loss.gt_train_path if split == 'train' else cfg.loss.gt_val_path
-                self._load_gt_params()
+        if self.gt_params_path is not None:
+            self._load_gt_params()
     
     def _load_gt_params(self):
         if not os.path.exists(self.gt_params_path):
@@ -214,9 +211,9 @@ class ObjectDataset(Dataset):
             print(f"Error loading GT params: {e}")
             self.gt_data = None
 
-    def _load_pointcloud(self, model_path, use_precomputed=False):
+    def _load_pointcloud(self, model_path):
         # Load pointcloud and normals, prefer precomputed 4096 file on test
-        if self.split == 'test' or use_precomputed:
+        if self.split == 'test' or self.use_fps:
             try:
                 pc_data = np.load(os.path.join(model_path, "pointcloud_4096.npz"))
                 points = pc_data["points"]
@@ -267,6 +264,8 @@ class ObjectDataset(Dataset):
             gt_trans = self.gt_data['translation'][idx]
             gt_rotate = self.gt_data['rotation'][idx]
             gt_exist = self.gt_data['exist'][idx]
+            gt_tapering = self.gt_data['tapering'][idx]
+            gt_bending = self.gt_data['bending'][idx]
 
             translation_np = res['translation'].numpy() if isinstance(res['translation'], torch.Tensor) else res['translation']
             gt_trans = (gt_trans - translation_np) / res['scale']
@@ -277,18 +276,58 @@ class ObjectDataset(Dataset):
                 'gt_shape': torch.from_numpy(gt_shape).float(),
                 'gt_trans': torch.from_numpy(gt_trans).float(),
                 'gt_rotate': torch.from_numpy(gt_rotate).float(),
-                'gt_exist': torch.from_numpy(gt_exist).float()
+                'gt_exist': torch.from_numpy(gt_exist).float(),
+                'gt_tapering': torch.from_numpy(gt_tapering).float(),
+                'gt_bending': torch.from_numpy(gt_bending).float(),
             })
+    
+    def _get_model_path(self, idx):
+        raise NotImplementedError(
+            "Method _get_model_path is not implemented in class "
+            + self.__class__.__name__
+        )
+    
+    def __getitem__(self, idx):
+        model_id, model_path = self._get_model_path(idx)
+        points, normals, pc_data = self._load_pointcloud(model_path)
 
+        if self.normalize:
+            points, translation, scale  = normalize_points(points)
+        else:
+            translation = np.zeros(3)
+            scale = 1.0
+
+        if self.transform is not None:
+            # Initialize accumulation matrix
+            transform_info = {'matrix': np.eye(4)}
+            t_data = self.transform(points=points, normals=normals, transform_info=transform_info)
+            points = t_data['points']
+            normals = t_data['normals']
+            transform_matrix = t_data['transform_info']['matrix'] # 4x4
+        else:
+            transform_matrix = np.eye(4)
+
+        res = {
+            "points": torch.from_numpy(points),
+            "normals": torch.from_numpy(normals),
+            "translation": torch.from_numpy(translation),
+            "scale": scale,
+            "point_num": points.shape[0],
+            "model_id": model_id,
+            "idx": idx,
+            "aug_matrix": torch.from_numpy(transform_matrix).float()
+        }
+
+        self._add_occupancy_and_gt(res, model_id, model_path)
+        return res
 
 class ShapeNet(ObjectDataset):
     def __init__(self, split: str, cfg):
-        super().__init__(split, cfg)
+        super().__init__(split, cfg.shapenet)
         self.split = split
         self.data_root = cfg.shapenet.path
 
         self.transform = get_transforms(split, cfg)
-        self.normalize = cfg.shapenet.normalize
 
         self.categories = self._load_categories(cfg.shapenet.categories)
         self.models = self._gather_models()
@@ -315,41 +354,17 @@ class ShapeNet(ObjectDataset):
     def __len__(self):
         return len(self.models)
 
-    def __getitem__(self, idx):
+    def _get_model_path(self, idx):
         model = self.models[idx]
         model_path = os.path.join(self.data_root, model['category'], model['model_id'])
-
-        points, normals, _ = self._load_pointcloud(model_path)
-
-        if self.normalize:
-            points, translation, scale  = normalize_points(points)
-        else:
-            translation = np.zeros(3)
-            scale = 1.0
-
-        if self.transform is not None:
-            t_data = self.transform(points=points, normals=normals)
-            points = t_data['points']
-            normals = t_data['normals']
-
-        res = {
-            "points": torch.from_numpy(points),
-            "normals": torch.from_numpy(normals),
-            "translation": torch.from_numpy(translation),
-            "scale": scale,
-            "point_num": points.shape[0],
-            "model_id": model['model_id']
-        }
-
-        self._add_occupancy_and_gt(res, model['model_id'], model_path)
-        return res
-
+        return model['model_id'], model_path
+    
     def name(self):
         return 'ShapeNet'
 
 class ABO(ObjectDataset):
     def __init__(self, split: str, cfg):
-        super().__init__(split, cfg)
+        super().__init__(split, cfg.abo)
         self.split = split
         self.data_root = cfg.abo.path
 
@@ -369,12 +384,8 @@ class ABO(ObjectDataset):
         
         # Simple deterministic split: 80% train, 10% val, 10% test
         n_models = len(models)
-        # n_train = int(n_models * 0.8)
-        # n_val = int(n_models * 0.9)
-        
-        # TODO: no validation or test at the moment
-        n_train = int(n_models * 1)
-        n_val = int(n_models * 1) 
+        n_train = int(n_models * 0.8)
+        n_val = int(n_models * 0.9)
         
         if self.split == 'train':
             models = models[:n_train]
@@ -387,42 +398,13 @@ class ABO(ObjectDataset):
         
         return [{'model_id': m} for m in models]
 
-    def __len__(self):
-        return len(self.models)
-
-    def __getitem__(self, idx):
+    def _get_model_path(self, idx):
         model = self.models[idx]
         model_path = os.path.join(self.data_root, model['model_id'])
-        
-        # TODO: use furthest point downsample for now (best results)
-        points, normals, pc_data = self._load_pointcloud(model_path, use_precomputed=True)
-        rescale = pc_data["scale"]
-        recenter = pc_data["center"]
+        return model['model_id'], model_path
 
-        if self.normalize:
-            points, translation, scale  = normalize_points(points)
-        else:
-            translation = np.zeros(3)
-            scale = 1.0
-
-        if self.transform is not None:
-            t_data = self.transform(points=points, normals=normals)
-            points = t_data['points']
-            normals = t_data['normals']
-
-        res = {
-            "recenter": torch.from_numpy(recenter),
-            "rescale": torch.from_numpy(rescale),
-            "points": torch.from_numpy(points),
-            "normals": torch.from_numpy(normals),
-            "translation": torch.from_numpy(translation),
-            "scale": scale,
-            "point_num": points.shape[0],
-            "model_id": model['model_id']
-        }
-
-        self._add_occupancy_and_gt(res, model['model_id'], model_path)
-        return res
+    def __len__(self):
+        return len(self.models)
 
     def name(self):
         return 'ABO'

@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from superdec.utils.predictions_handler import PredictionHandler
+from superdec.utils.predictions_handler_extended import PredictionHandler
 
 
 def main():

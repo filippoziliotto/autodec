@@ -5,7 +5,7 @@ import torch
 class SuperDecHead(nn.Module):
     """Head for Superquadrics Prediction"""
     
-    def __init__(self, emb_dims):
+    def __init__(self, emb_dims, ctx):
         super(SuperDecHead, self).__init__()
         self.emb_dims = emb_dims
         self.scale_head = nn.Linear(emb_dims, 3)
@@ -13,6 +13,12 @@ class SuperDecHead(nn.Module):
         self.rot_head = nn.Linear(emb_dims, 4)
         self.t_head = nn.Linear(emb_dims, 3)
         self.exist_head = nn.Linear(emb_dims, 1)
+        
+        self.extended = getattr(ctx, 'extended', False)
+        if self.extended:
+            self.tapering_head = nn.Linear(emb_dims, 2)
+            self.bending_k_head = nn.Linear(emb_dims, 3)
+            self.bending_a_head = nn.Linear(emb_dims, 3)
 
 
     def forward(self, x):
@@ -29,7 +35,13 @@ class SuperDecHead(nn.Module):
 
         exist = self.exist_activation(self.exist_head(x))
 
-        return {"scale": scale, "shape": shape, "rotate": rotation, "trans": translation, "exist": exist}
+        out_dict = {"scale": scale, "shape": shape, "rotate": rotation, "trans": translation, "exist": exist}
+        if self.extended:
+            tapering = self.tapering_activation(self.tapering_head(x))
+            bending_k = self.bending_k_activation(self.bending_k_head(x), scale)
+            bending_a = self.bending_a_activation(self.bending_a_head(x))
+            out_dict.update({"tapering": tapering, "bending_k": bending_k, "bending_a": bending_a})
+        return out_dict
         
     @staticmethod  
     def quat2mat(quat):
@@ -48,8 +60,9 @@ class SuperDecHead(nn.Module):
         rotMat = rotMat.view(B,N,3,3)
         return rotMat 
     
-    def scale_activation(self, x):
-        return  torch.sigmoid(x) 
+    @staticmethod 
+    def scale_activation(x):
+        return torch.sigmoid(x) 
     
     @staticmethod 
     def shape_activation(x):
@@ -58,3 +71,17 @@ class SuperDecHead(nn.Module):
     @staticmethod 
     def exist_activation(x):
         return torch.sigmoid(x)
+    
+    @staticmethod 
+    def tapering_activation(x):
+        return torch.tanh(x)
+    
+    @staticmethod 
+    def bending_k_activation(x, scale):
+        tau = 0.01
+        max_scale = tau * torch.logsumexp(scale/tau, keepdim=True, dim=-1)
+        return (torch.sigmoid(x) * 0.95) / max_scale 
+    
+    @staticmethod 
+    def bending_a_activation(x):
+        return torch.sigmoid(x) * 2 * torch.pi

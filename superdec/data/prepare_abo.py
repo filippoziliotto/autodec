@@ -7,6 +7,7 @@ import trimesh
 import torch
 from torch_geometric.nn import fps
 from tqdm import tqdm
+multiprocessing.set_start_method("spawn", force=True)
 
 def process_file(args):
     input_file, output_root, n_points_surf, n_points_vol = args
@@ -40,28 +41,25 @@ def process_file(args):
             print(f"Not a mesh: {input_file} {type(mesh)}")
             return
         
-        # Normalize
-        # Center
         if mesh.bounds is None: return
         center = mesh.bounding_box.centroid
-        mesh.apply_translation(-center)
-        
-        # Scale
-        # Fit to unit cube [-0.5, 0.5] (size 1.0)
         max_extent = np.max(mesh.extents)
-        scale = 1.0 / max_extent
-        mesh.apply_scale(scale)
 
         # 1. Surface points
         points_surface, face_indices = trimesh.sample.sample_surface(mesh, n_points_surf)
         normals_surface = mesh.face_normals[face_indices]
 
         # 2. Volume points
-        voxel_grid = mesh.voxelized(pitch=1.1/100)
+        # Keep relative resolution (1% of bounding box + padding)
+        pitch = (max_extent * 1.1) / 100
+        voxel_grid = mesh.voxelized(pitch=pitch)
         voxel_grid = voxel_grid.fill()
 
-        # Random uniform points in [-0.55, 0.55]
-        points_vol = np.random.uniform(-0.55, 0.55, (n_points_vol, 3))
+        # Random uniform points in bbox + 5% padding
+        half_size = (max_extent * 1.1) / 2
+        min_bound = center - half_size
+        max_bound = center + half_size
+        points_vol = np.random.uniform(min_bound, max_bound, (n_points_vol, 3))
         
         # Check occupancy
         occupancies = voxel_grid.is_filled(points_vol)
@@ -79,9 +77,9 @@ def process_file(args):
         
         # Save to files
         os.makedirs(output_dir, exist_ok=True)
-        np.savez_compressed(pc_path, points=points_surface.astype(np.float32), normals=normals_surface.astype(np.float32), scale=np.float32(scale), center=np.float32(center))
-        np.savez_compressed(points_path, points=points_vol.astype(np.float32), occupancies=packed_occ, scale=np.float32(scale), center=np.float32(center))
-        np.savez_compressed(path_4096, points=points_4096.astype(np.float32), normals=normals_4096.astype(np.float32), scale=np.float32(scale), center=np.float32(center))
+        np.savez_compressed(pc_path, points=points_surface.astype(np.float32), normals=normals_surface.astype(np.float32))
+        np.savez_compressed(points_path, points=points_vol.astype(np.float32), occupancies=packed_occ)
+        np.savez_compressed(path_4096, points=points_4096.astype(np.float32), normals=normals_4096.astype(np.float32))
         
     except Exception as e:
         print(f"Error processing {input_file}: {e}")
@@ -90,7 +88,7 @@ def main():
     parser = argparse.ArgumentParser(description="Process ABO dataset.")
     parser.add_argument("--input_dir", type=str, default="data/ABO/raw-complete/3dmodels/original", help="Path to input GLB files")
     parser.add_argument("--output_dir", type=str, default="data/ABO/processed-complete", help="Path to output directory")
-    parser.add_argument("--num_workers", type=int, default=64, help="Number of worker processes")
+    parser.add_argument("--num_workers", type=int, default=32, help="Number of worker processes")
     parser.add_argument("--n_surf", type=int, default=100000, help="Number of surface points")
     parser.add_argument("--n_vol", type=int, default=100000, help="Number of volume points")
     

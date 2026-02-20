@@ -1,0 +1,23 @@
+# Hydra config for batch evaluation used by superoptim/batch_evaluate.py
+type: none
+prefix: normalized/abo_train
+small: true
+num_epochs: 1000
+device: cuda
+
+dataloader:
+  dataset: abo
+  batch_size: 8
+  num_workers: 4
+
+shapenet:
+  split: test
+  path: data/ShapeNet
+  load_occupancy: true
+  use_fps: true
+
+abo:
+  split: train
+  path: data/ABO/processed-complete
+  load_occupancy: true
+  normalize: false

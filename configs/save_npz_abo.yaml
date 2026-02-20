@@ -1,7 +1,7 @@
 # checkpoints_folder: checkpoints/abo
-checkpoints_folder: checkpoints/abo
-checkpoint_file: epoch_350.pt
-output_dir: data/output_npz/abo_ft
+checkpoints_folder: checkpoints/normalized
+checkpoint_file: ckpt.pt
+output_dir: data/output_npz/normalized
 config_file: config.yaml
 device: "cuda"
 dataset: abo
@@ -11,7 +11,7 @@ dataloader:
   num_workers: 4
 abo:
   path: "data/ABO/processed-complete"
-  normalize: false
-  categories: null
+  use_fps: true
+  normalize: true
 evaluation:
   resolution: 50 

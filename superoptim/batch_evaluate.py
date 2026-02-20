@@ -5,69 +5,54 @@ from tqdm import tqdm
 from superdec.utils.predictions_handler_extended import PredictionHandler
 import viser
 import random
-import argparse
+import hydra
+from omegaconf import DictConfig
 import importlib
 import gc
+from torch.utils.data import DataLoader, Subset
+from omegaconf import OmegaConf
 
-from .evaluation import get_outdict, eval_mesh
+from superdec.data.dataloader import ShapeNet, ABO
+from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--type", type=str, default="empty", help="Type of superq module (empty, segmented, etc.)")
-    parser.add_argument("--prefix", type=str, default="shapenet_test", help="Npz file prefix")
-    parser.add_argument("--small", action='store_true', help="Run eval on only 128 objects")
-    args = parser.parse_args()
+def main(cfg: DictConfig):
+    module_type = cfg.get('type', 'iou_bend')
+    prefix = cfg.get('prefix', 'shapenet/shapenet_test')
+    small = cfg.get('small', False)
 
     try:
         # Import dynamically based on type
-        module_name = f"superoptim.{args.type}.batch_superq"
+        module_name = f"superoptim.{module_type}.batch_superq"
         module = importlib.import_module(module_name)
         BatchSuperQMulti = module.BatchSuperQMulti
-    except ImportError:
-        print(f"Error importing BatchSuperQMulti for type '{args.type}': {e}")
+    except Exception as e:
+        print(f"Error importing BatchSuperQMulti for type '{module_type}': {e}")
         return
 
-    print(f"Evaluating {args.type} on {args.prefix}...")
-    input_npz = f"data/output_npz/{args.prefix}.npz"
-    output_npz = f"data/output_npz/{args.prefix}_optimized_{args.type}.npz"
-
-    # server = viser.ViserServer()
-    # server.scene.set_up_direction([0.0, 1.0, 0.0])
-    
-    # Check if file exists
-    if not os.path.exists(input_npz):
-        print(f"Error: {input_npz} not found.")
-        return
-
+    print(f"Evaluating {module_type} on {prefix}...")
+    input_npz = f"data/output_npz/{prefix}.npz"
+    output_npz = f"data/output_npz/{prefix}_optimized_{module_type}.npz"
     print(f"Loading {input_npz}...")
     pred_handler = PredictionHandler.from_npz(input_npz)
     
-    valid_objs = []
-    if "shapenet" in args.prefix:
-        data_root = "data/ShapeNet"
-        for c in os.listdir(data_root):
-            category_path = os.path.join(data_root, c)
-            for i, name in enumerate(pred_handler.names):
-                if os.path.exists(os.path.join(category_path, name)):
-                    valid_objs.append((i, category_path))
-    elif "abo" in args.prefix:
-        data_root = "data/ABO/processed-complete"
-        for i in range(len(pred_handler.names)):
-            valid_objs.append((i, data_root))
-    else:
-        print("Cannot locate ground truth data")
-        exit()
+    # Build dataloader from config (expects cfg.dataloader.*)
+    dataloader = build_dataloader(cfg)
+    # Sanity-check: ensure prediction names align with dataset model_ids
+    dataset_names = [m['model_id'] for m in dataloader.dataset.models]
+    assert np.array_equal(pred_handler.names, dataset_names), (
+        f"Object order differs between pred_handler and dataset."
+    )
+    valid_indices = list(range(len(pred_handler.names)))
 
-    if args.small:
-        random.seed(0)
-        valid_objs = random.sample(valid_objs, 128)
-    
-    # valid_objs = valid_objs[:32] # Limit to 32 objects for testing
-    print(f"Loaded {len(valid_objs)} objects from all categories out of {pred_handler.scale.shape[0]}.")
+    if small:
+        valid_indices = random.sample(valid_indices, min(len(valid_indices), 128))
+        subset = Subset(dataloader.dataset, valid_indices)
+        dataloader = _build_dataloader(cfg, subset)
+    print(f"Loaded {len(valid_indices)} objects from all categories out of {pred_handler.scale.shape[0]}.")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    num_epochs = 1_000
-    if args.type == "none": num_epochs = 0
+    num_epochs = cfg.get('num_epochs', 1000)
+    if module_type == "none": num_epochs = 0
     
     # Store aggregated metrics
     aggregated_metrics = {
@@ -82,21 +67,26 @@ def main():
     }
     
     # Store per-object metrics for ranking
-    object_metrics = [] # List of tuples: (index, name, chamfer_l1)
-    batch_size = 64
-    
-    for i in tqdm(range(0, len(valid_objs), batch_size), desc="Processing batches"):
-        batch_objs = valid_objs[i : i + batch_size]
-        batch_indices = [x[0] for x in batch_objs]
-        # print(f"Processing batch {i//batch_size + 1}, indices: {batch_indices}")
-        
-        ply_paths = [f"{category_path}/{pred_handler.names[idx]}/pointcloud.npz" for idx, category_path in batch_objs]
+    object_metrics = []
+    for batch in tqdm(dataloader, desc="Processing batches"):
+        batch_indices = batch['idx']
+
+        # Move tensors to device
+        points = batch['points'].to(device)
+        normals = batch['normals'].to(device)
+        points_iou = batch['points_iou'].to(device)
+        occupancies = batch['occupancies'].to(device)
         
         superq = BatchSuperQMulti(
             pred_handler=pred_handler,
             indices=batch_indices,
-            ply_paths=ply_paths,
-            device=device
+            device=device,
+            external_data={
+                'points': points,
+                'normals': normals,
+                'points_iou': points_iou,
+                'occupancies': occupancies
+            }
         )
         
         param_groups = superq.get_param_groups()
@@ -104,7 +94,7 @@ def main():
         
 
         best_losses = [float('inf')] * len(batch_indices)
-        best_params = [None] * len(batch_indices)        
+        best_params = [None] * len(batch_indices)
         
         # Optimization Loop
         for epoch in range(num_epochs):
@@ -153,27 +143,9 @@ def main():
                         superq.raw_bending[b].copy_(best_params[b]["raw_bending"])
 
         # Compute IoU using SDF
-        # Load points.npz
-        if hasattr(superq, 'points') and hasattr(superq, 'occupancies') and hasattr(superq, 'M_points_iou'):
-            all_points_t = superq.points[:, :superq.M_points_iou, :].transpose(1, 2)
-            all_occ_t = superq.occupancies
-        else:
-            points_iou_list = []
-            occ_tgt_list = []
-            for idx_in_batch, (idx, category_path) in enumerate(batch_objs):
-                obj_name = pred_handler.names[idx]
-                points_file = os.path.join(category_path, obj_name, "points.npz")
-                
-                points_dict = np.load(points_file)
-                pts = points_dict['points']
-                occ = points_dict['occupancies']
-                if np.issubdtype(occ.dtype, np.uint8):
-                    occ = np.unpackbits(occ)[:pts.shape[0]]
-                
-                points_iou_list.append(pts)
-                occ_tgt_list.append(occ)
-            all_points_t = torch.tensor(np.stack(points_iou_list), dtype=torch.float, device=device).transpose(1, 2)
-            all_occ_t = torch.tensor(np.stack(occ_tgt_list), dtype=torch.bool, device=device)
+        all_points_t = points_iou.transpose(1, 2)
+        all_occ_t = occupancies
+        if all_occ_t.dtype == torch.uint8: all_occ_t = all_occ_t.bool()
 
         with torch.no_grad():
             sdfs = superq.sdf_batch(all_points_t) # (B, N, M)
@@ -205,19 +177,16 @@ def main():
                 mesh = pred_handler.get_mesh(idx, resolution=100, colors=False)
             except Exception as e:
                 print(f"Error generating mesh for object {idx}: {e}")
-                continue
+                exit()
 
-            if mesh is None:
-                continue
-
-            gt_pc = pred_handler.pc[idx] 
-            gt_normal = None
             try:
+                gt_pc = points[b_idx].cpu().numpy()
+                gt_normal = normals[b_idx].cpu().numpy()
                 out_dict_cur = eval_mesh(mesh, gt_pc, gt_normal, None, None)
-                out_dict_cur['iou'] = float(batch_ious[b_idx])
+                out_dict_cur['iou'] = float(batch_ious[b_idx]) if batch_ious is not None else 0.0
             except Exception as e:
                 print(f"Eval mesh failed: {e}")
-                continue
+                exit()
             
             num_prim = (pred_handler.exist[idx] > 0.5).sum()
             aggregated_metrics['chamfer-L1'] += out_dict_cur['chamfer-L1']
@@ -242,24 +211,21 @@ def main():
             })
 
     # Save results
-    if args.type != "none" or args.small:
+    if module_type != "none" or small:
         print(f"Saving optimized results to {output_npz}...")
-        if args.small:
+        if small:
             output_npz = output_npz.replace("output_npz", "output_npz/small")
-            sel_indices = [idx for idx, _ in valid_objs]
             predictions = {
-                'names': np.array(pred_handler.names)[sel_indices],
-                'rescale': np.array(pred_handler.rescale)[sel_indices],
-                'recenter': np.array(pred_handler.recenter)[sel_indices],
-                'pc': np.array(pred_handler.pc)[sel_indices],
-                'assign_matrix': np.array(pred_handler.assign_matrix)[sel_indices],
-                'scale': np.array(pred_handler.scale)[sel_indices],
-                'rotation': np.array(pred_handler.rotation)[sel_indices],
-                'translation': np.array(pred_handler.translation)[sel_indices],
-                'exponents': np.array(pred_handler.exponents)[sel_indices],
-                'exist': np.array(pred_handler.exist)[sel_indices],
-                'tapering': np.array(pred_handler.tapering)[sel_indices],
-                'bending': np.array(pred_handler.bending)[sel_indices],
+                'names': np.array(pred_handler.names)[valid_indices],
+                'pc': np.array(pred_handler.pc)[valid_indices],
+                'assign_matrix': np.array(pred_handler.assign_matrix)[valid_indices],
+                'scale': np.array(pred_handler.scale)[valid_indices],
+                'rotation': np.array(pred_handler.rotation)[valid_indices],
+                'translation': np.array(pred_handler.translation)[valid_indices],
+                'exponents': np.array(pred_handler.exponents)[valid_indices],
+                'exist': np.array(pred_handler.exist)[valid_indices],
+                'tapering': np.array(pred_handler.tapering)[valid_indices],
+                'bending': np.array(pred_handler.bending)[valid_indices],
             }
             small_handler = PredictionHandler(predictions)
             small_handler.save_npz(output_npz)
@@ -307,7 +273,11 @@ def main():
         print("No valid objects evaluated.")
 
 if __name__ == "__main__":
-    torch.manual_seed(0)
-    np.random.seed(0)
-    random.seed(0)
-    main()
+    @hydra.main(version_base=None, config_path="../configs", config_name="batch_eval")
+    def run_main(cfg: DictConfig):
+        torch.manual_seed(0)
+        np.random.seed(0)
+        random.seed(0)
+        main(cfg)
+
+    run_main()

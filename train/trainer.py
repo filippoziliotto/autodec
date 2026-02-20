@@ -84,8 +84,6 @@ class Trainer:
 
     def train_one_epoch(self, epoch):
         """Train for one epoch."""
-        if hasattr(self.loss_fn, 'step'):
-            self.loss_fn.step(epoch)
 
         self.model.train()
         loader = self.dataloaders['train']

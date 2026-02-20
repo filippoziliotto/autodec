@@ -20,6 +20,7 @@ class BatchSuperQMulti(nn.Module):
         ply_paths: list[str] = None,
         truncation: float = 0.05,
         device: str = "cuda",
+        external_data: dict = None
     ):
         super().__init__()
         self.indices = indices
@@ -62,20 +63,24 @@ class BatchSuperQMulti(nn.Module):
             trans_list.append(t)
             
             # --- Points ---
-            ply = ply_paths[i] if ply_paths else None
-            pts = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
-            nrms = None
-            try:
-                data = np.load(ply)
-                pts_ply = torch.tensor(np.array(data['points']), dtype=torch.float, device=device) 
-                ply_normals = torch.tensor(np.array(data['normals']), dtype=torch.float, device=device) 
-                distances = torch.cdist(pts, pts_ply)
-                closest = torch.argmin(distances, dim=1)
-                nrms = ply_normals[closest]
-            except Exception as e:
-                print(f"Error loading {ply}: {e}")
+            if external_data is not None:
+                pts = external_data['points'][i]
+                nrms = external_data['normals'][i]
+            else:
+                ply = ply_paths[i] if ply_paths else None
+                pts = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
+                nrms = None
+                try:
+                    data = np.load(ply)
+                    pts_ply = torch.tensor(np.array(data['points']), dtype=torch.float, device=device) 
+                    ply_normals = torch.tensor(np.array(data['normals']), dtype=torch.float, device=device) 
+                    distances = torch.cdist(pts, pts_ply)
+                    closest = torch.argmin(distances, dim=1)
+                    nrms = ply_normals[closest]
+                except Exception as e:
+                    print(f"Error loading {ply}: {e}")
             
-            # Ensure pts has correct shape if not loaded from ply
+            # Ensure pts has correct shape if not loaded from ply or external
             if pts.shape[0] != self.M_points:
                 print(f"Error points shape missmatch")
                 exit()

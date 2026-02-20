@@ -86,7 +86,7 @@ def main():
 
     # Attributes to collect
     # Based on PredictionHandler structure
-    keys = ['names', 'rescale', 'recenter', 'pc', 'assign_matrix', 
+    keys = ['names', 'pc', 'assign_matrix', 
             'scale', 'rotation', 'translation', 'exponents', 'exist', 
             'tapering', 'bending']
     

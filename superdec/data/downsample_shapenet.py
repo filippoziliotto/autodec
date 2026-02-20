@@ -2,10 +2,11 @@ import os
 import argparse
 import multiprocessing as mp
 
+import torch
+from torch_geometric.nn import fps
 import numpy as np
-import open3d as o3d
 from tqdm import tqdm
-
+mp.set_start_method("spawn", force=True)
 
 def process_model(model_path):
     try:
@@ -18,12 +19,17 @@ def process_model(model_path):
         pc_data = np.load(pc_file)
         points = pc_data["points"]
         normals = pc_data["normals"]
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        pcd.normals = o3d.utility.Vector3dVector(normals)
-        downsampled_pcd = pcd.farthest_point_down_sample(4096)
-        points = np.asarray(downsampled_pcd.points)
-        normals = np.asarray(downsampled_pcd.normals)
+        
+        # FPS downsampling with torch_geometric
+        points_tensor = torch.from_numpy(points)
+        ratio = 4096 / points.shape[0]
+        indices = fps(points_tensor, ratio=ratio)
+        indices = indices[:4096].numpy() #make sure it's 4096
+        points_4096 = points[indices]
+        normals_4096 = normals[indices]
+        
+        points = np.asarray(points_4096)
+        normals = np.asarray(normals_4096)
         np.savez(out_path, points=points, normals=normals)
         return ("ok", model_path)
     except Exception as e:

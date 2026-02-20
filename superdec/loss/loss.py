@@ -182,18 +182,11 @@ class SuperDecLoss(BaseLoss):
         loss_dict['all'] = loss.item()
         return loss, loss_dict
 
-class ParamLoss(SuperDecLoss):
+class ParamLoss(nn.Module):
     def __init__(self, cfg):
-        super().__init__(cfg)
+        super().__init__()
         self.w_param = getattr(cfg, 'w_param', 1.0)
-        self.w_param_decay = getattr(cfg, 'w_param_decay', 1.0)
-        self.min_w_param = getattr(cfg, 'min_w_param', 0.0)
         self.initial_w_param = self.w_param
-
-    def step(self, epoch):
-        """Update w_param based on the current epoch."""
-        decay_factor = self.w_param_decay ** epoch
-        self.w_param = max(self.min_w_param, self.initial_w_param * decay_factor)
     
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
@@ -205,37 +198,55 @@ class ParamLoss(SuperDecLoss):
         loss = 0
         loss_dict = {}            
         mask = (gt_exist > 0.5).float()
+
+        # Existance (binary cross-entropy)
+        exist_loss = nn.BCELoss()(out_dict['exist'], gt_exist)
+        loss += exist_loss
+        loss_dict['param_exist'] = exist_loss.item()
         
         # Scale
         scale_loss = nn.MSELoss(reduction='none')(out_dict['scale'], gt_scale) # [B, P, 3]
         scale_loss = (scale_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
         loss += scale_loss
-        # loss_dict['param_scale'] = scale_loss.item()
+        loss_dict['param_scale'] = scale_loss.item()
         
         # Shape
         shape_loss = nn.MSELoss(reduction='none')(out_dict['shape'], gt_shape) # [B, P, 2]
         shape_loss = (shape_loss * mask).sum() / (mask.sum() * 2 + 1e-6)
         loss += shape_loss
-        # loss_dict['param_shape'] = shape_loss.item()
+        loss_dict['param_shape'] = shape_loss.item()
         
         # Translation
         trans_loss = nn.MSELoss(reduction='none')(out_dict['trans'], gt_trans) # [B, P, 3]
         trans_loss = (trans_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
         loss += trans_loss
-        # loss_dict['param_trans'] = trans_loss.item()
+        loss_dict['param_trans'] = trans_loss.item()
         
         # Rotation
         rot_loss = nn.MSELoss(reduction='none')(out_dict['rotate'], gt_rotate) # [B, P, 3, 3]
         rot_loss = (rot_loss * mask.unsqueeze(-1)).sum() / (mask.sum() * 9 + 1e-6)
         loss += rot_loss
-        # loss_dict['param_rot'] = rot_loss.item()
+        loss_dict['param_rot'] = rot_loss.item()
+
+        # Tapering
+        if 'tapering' in out_dict:
+            gt_tapering = batch['gt_tapering'].cuda().float()
+            tapering_loss = nn.MSELoss(reduction='none')(out_dict['tapering'], gt_tapering)
+            tapering_loss = (tapering_loss * mask).sum() / (mask.sum() * tapering_loss.shape[-1] + 1e-6)
+            loss += tapering_loss
+            loss_dict['param_tapering'] = tapering_loss.item()
+
+        # Bending
+        if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            gt_bending = batch['gt_bending'].cuda().float()  # [B, P, 6]
+            bending_pred = torch.stack([out_dict['bending_k'], out_dict['bending_a']], dim=-1).reshape(gt_bending.shape)
+
+            bend_loss = nn.MSELoss(reduction='none')(bending_pred, gt_bending)
+            bend_loss = (bend_loss * mask).sum() / (mask.sum() * 6 + 1e-6)
+            loss += bend_loss
+            loss_dict['param_bending'] = bend_loss.item()
         
         total_loss = self.w_param * loss
-        loss_dict['param_loss'] = loss.item()
-        
-        base_loss, base_dict = super().forward(batch, out_dict)
-        loss_dict.update(base_dict)
-        total_loss += base_loss
         loss_dict['all'] = total_loss.item()
         return total_loss, loss_dict
 
@@ -267,7 +278,36 @@ class IoULoss(BaseLoss):
         # translate
         poles_world = poles_world + trans.unsqueeze(2)
         return poles_world
+    
+    def inverse_bending_axis(self, x, y, z, kb, alpha, axis):
+        if axis == 'z':
+            u, v, w = x, y, z
+        elif axis == 'x':
+            u, v, w = y, z, x
+        elif axis == 'y':
+            u, v, w = z, x, y
+        else:
+             return x, y, z
 
+        # Precompute reciprocal efficiently
+        inv_kb = 1.0 / (kb + 1e-6)
+        
+        angle_offset = torch.atan2(v, u)
+        R = torch.sqrt(u**2 + v**2) * torch.cos(alpha - angle_offset)
+        gamma = torch.atan2(w, inv_kb - R)
+        r = inv_kb - torch.sqrt(w**2 + (inv_kb - R)**2)
+        
+        u = u - (R - r) * torch.cos(alpha)
+        v = v - (R - r) * torch.sin(alpha)
+        w = inv_kb * gamma
+
+        if axis == 'z':
+            return u, v, w
+        elif axis == 'x':
+            return w, u, v
+        elif axis == 'y':
+            return v, w, u
+    
     def sdf_batch(self, points, out_dict):
         # points: (B, M, 3) -> expects transpose for math -> (B, 3, M) roughly
         points = points.transpose(1, 2) # (B, 3, M)
@@ -276,7 +316,6 @@ class IoULoss(BaseLoss):
         exponents = out_dict['shape'] # (B, N, 2)
         rotate = out_dict['rotate'] # (B, N, 3, 3)
         trans = out_dict['trans'] # (B, N, 3)
-        tapering = out_dict.get('tapering', torch.zeros_like(exponents)) # (B, N, 2)
 
         B, _, M = points.shape
         N = scale.shape[1]
@@ -302,18 +341,30 @@ class IoULoss(BaseLoss):
         y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
         z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
         
-        kx = tapering[..., 0].unsqueeze(-1)
-        ky = tapering[..., 1].unsqueeze(-1)
-        
-        fx = safe_mul(kx/sz, z) + 1
-        fy = safe_mul(ky/sz, z) + 1
-        
-        # Check tapering signs
-        fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
-        fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
-        
-        x = x / fx
-        y = y / fy
+        # Apply tapering
+        if 'tapering' in out_dict:
+            tapering = out_dict['tapering'] # (B, N, 2)
+            kx = tapering[..., 0].unsqueeze(-1)
+            ky = tapering[..., 1].unsqueeze(-1)
+            
+            fx = safe_mul(kx/sz, z) + 1
+            fy = safe_mul(ky/sz, z) + 1
+            
+            # Check tapering signs
+            fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
+            fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
+            
+            x = x / fx
+            y = y / fy
+
+        # Apply bending
+        if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            bending_k = out_dict['bending_k'] # (B, N, 3)
+            bending_a = out_dict['bending_a'] # (B, N, 3)
+            
+            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 0].unsqueeze(-1), bending_a[..., 0].unsqueeze(-1), 'z')
+            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 1].unsqueeze(-1), bending_a[..., 1].unsqueeze(-1), 'x')
+            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 2].unsqueeze(-1), bending_a[..., 2].unsqueeze(-1), 'y')
         
         r0 = torch.sqrt(x**2 + y**2 + z**2)
         
