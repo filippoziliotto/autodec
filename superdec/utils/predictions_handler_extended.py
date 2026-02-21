@@ -11,7 +11,7 @@ def extend_dict(outdict):
     else: cls = np
     
     B, N, _ = outdict['scale'].shape
-    if 'tapering' not in outdict: 
+    if 'tapering' not in outdict:
         outdict['tapering'] = cls.zeros((B, N, 2))
     if 'bending' not in outdict or outdict['bending'].shape[-1] != 6: 
         outdict['bending'] = cls.zeros((B, N, 6))
@@ -144,11 +144,11 @@ class PredictionHandler:
                 vertices_cur, faces_cur = mesh
 
                 vertices.append(vertices_cur)
-                faces.append(faces_cur + os_vertices) 
+                faces.append(faces_cur + os_vertices)
 
                 if colors:
                     cur_color = self.colors[p]
-                    v_colors.append(np.ones((vertices_cur.shape[0],3)) * cur_color) 
+                    v_colors.append(np.ones((vertices_cur.shape[0],3)) * cur_color)
                     f_colors.append(np.ones((faces_cur.shape[0],3)) * cur_color)
 
                 os_vertices += len(vertices_cur)
@@ -173,15 +173,25 @@ class PredictionHandler:
         elif axis == 'y':
             u, v_coord, w = z, x, y
         
-        # Precompute constants
-        inv_kb = 1.0 / val_kb
         sin_alpha = np.sin(val_alpha)
         cos_alpha = np.cos(val_alpha)
         
         beta = np.arctan2(v_coord, u)
         r = np.sqrt(u**2 + v_coord**2) * np.cos(val_alpha - beta)
+
+        # Clamp kb so 1/|kb| > r_max (prevents rho < 0 and self-intersection)
+        # r_max = np.max(np.abs(r))
+        # if r_max > 1e-6:
+        #     kb_max = 0.95 / r_max
+        #     if np.abs(val_kb) > kb_max:
+        #         print(f"[bending {axis}] clamping |kb| from {np.abs(val_kb):.4f} to {kb_max:.4f} (r_max={r_max:.4f})")
+        #         sign_kb = np.sign(val_kb)
+        #         val_kb = sign_kb * kb_max
+        #         if np.abs(val_kb) < 1e-3: return x, y, z
+ 
+        inv_kb = 1.0 / val_kb
         gamma = w * val_kb
-        rho = inv_kb - r        
+        rho = inv_kb - r
         R = inv_kb - rho * np.cos(gamma)
 
         expr = (R - r)
@@ -195,6 +205,52 @@ class PredictionHandler:
             return w, u, v_coord
         elif axis == 'y':
             return v_coord, w, u
+ 
+    @staticmethod
+    def _sample_superellipse_dc(a1, a2, e, theta_a, theta_b, N):
+        """Divide-and-conquer arc-length sampling of a superellipse.
+ 
+        Ported from superdec/fast_sampler. Distributes N angles between
+        theta_a and theta_b proportionally to chord length so that the
+        resulting points are approximately equally spaced in 2-D.
+        """
+        def fexp(x, p):
+            return np.copysign(np.abs(x)**p, x)
+ 
+        def xy(theta):
+            return (a1 * fexp(np.cos(theta), e),
+                    a2 * fexp(np.sin(theta), e))
+ 
+        def dist(A, B):
+            return np.sqrt((A[0] - B[0])**2 + (A[1] - B[1])**2)
+ 
+        thetas = np.empty(N)
+        thetas[0] = theta_a
+        thetas[N - 1] = theta_b
+ 
+        A = xy(theta_a)
+        B = xy(theta_b)
+        stack = [(A, B, theta_a, theta_b, N - 2, 1)]
+ 
+        while stack:
+            A, B, ta, tb, n, offset = stack.pop()
+            if n <= 0:
+                continue
+            theta = (ta + tb) / 2
+            C = xy(theta)
+            dA = dist(A, C)
+            dB = dist(C, B)
+            total = dA + dB
+            if total < 1e-12:
+                nA = n // 2
+            else:
+                nA = int(round(dA / total * (n - 1)))
+            nB = n - nA - 1
+            thetas[nA + offset] = theta
+            stack.append((A, C, ta, theta, nA, offset))
+            stack.append((C, B, theta, tb, nB, offset + nA + 1))
+ 
+        return thetas
 
     def _superquadric_mesh(self, scale, exponents, rotation, translation, tapering, bending, N):
         def f(o, m):
@@ -204,10 +260,13 @@ class PredictionHandler:
             cos_o = np.cos(o)
             return np.sign(cos_o) * np.abs(cos_o)**m
 
-        u = np.linspace(-np.pi, np.pi, N, endpoint=True)
-        v = np.linspace(-np.pi/2.0, np.pi/2.0, N, endpoint=True)
+        # Divide-and-conquer arc-length sampling (matches superdec/fast_sampler)
+        # omega (u): azimuthal, superellipse in (x, y) plane
+        u = self._sample_superellipse_dc(scale[0], scale[1], exponents[1], -np.pi, np.pi, N)
+        # eta (v): polar, superellipse in (x, z) plane
+        v = self._sample_superellipse_dc(scale[0], scale[2], exponents[0], -np.pi/2, np.pi/2, N)
         u = np.tile(u, N)
-        v = (np.repeat(v, N))
+        v = np.repeat(v, N)
         if np.linalg.det(rotation) < 0:
             u = u[::-1]
 
