@@ -89,16 +89,19 @@ def main():
             'gt_train_path': 'data/output_npz/shapenet/shapenet_train_optimized_iou_bend.npz',
             # 'normalize': True,
             'load_occupancy': True,
-            'use_fps': True,
+            # 'use_fps': True,
         },
         'abo': {
             'path': 'data/ABO/processed-complete',
             'gt_train_path': 'data/output_npz/abo/abo_train_optimized_iou_bend.npz',
             # 'normalize': True,
             'load_occupancy': True,
-            'use_fps': True,
+            # 'use_fps': True,
         },
-        'trainer': { 'augmentations': True }
+        'trainer': { 
+            'augmentations': True,
+            'occlusions': True
+        }
     })
 
     # Initialize dataset

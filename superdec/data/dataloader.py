@@ -8,6 +8,7 @@ from torch_geometric.nn import fps
 
 from superdec.utils.transforms import mat2quat
 from superdec.data.transform import RotateAroundAxis3d, Scale3d, RandomMove3d, Compose, rotate_around_axis
+from superdec.data.transform_occlusions import BackFaceCulling, RandomOcclusion, HRPOcclusion
 
 SHAPENET_CATEGORIES = {
     "04379243": "table", "02958343": "car", "03001627": "chair", "02691156": "airplane",
@@ -62,6 +63,16 @@ def get_transforms(split: str, cfg):
             y_min=-0.05, y_max=0.05,
             z_min=-0.1, z_max=0.1
         ),
+    ])
+
+def get_occlusion_transforms(split: str, cfg):
+    if split != 'train' or 'trainer' not in cfg or not cfg.trainer.occlusions:
+        return None
+    
+    return Compose([
+        BackFaceCulling(p=0.5),
+        RandomOcclusion(p=0.5),
+        # HRPOcclusion(p=0.5), # kind of slow
     ])
 
 class ScenesDataset(Dataset):
@@ -226,13 +237,20 @@ class ObjectDataset(Dataset):
                 pass
 
         pc_data = np.load(os.path.join(model_path, "pointcloud.npz"))
-        n_points = pc_data["points"].shape[0]
+        points = pc_data['points']
+        normals = pc_data['normals']
+        if self.transform_occlusions:
+            t_data = self.transform_occlusions(points=points, normals=normals)
+            points = t_data['points']
+            normals = t_data['normals']
+
+        n_points = points.shape[0]
         if self.split == 'test' or n_points >= 4096:
             idxs = np.random.choice(n_points, 4096, replace=False)
         else:
             idxs = np.random.choice(n_points, 4096)
-        points = pc_data["points"][idxs]
-        normals = pc_data["normals"][idxs]
+        points = points[idxs]
+        normals = normals[idxs]
         return points, normals, pc_data
     
     def _decompose_augmentation_matrix(self, res):
@@ -350,6 +368,7 @@ class ShapeNet(ObjectDataset):
         self.data_root = cfg.shapenet.path
 
         self.transform = get_transforms(split, cfg)
+        self.transform_occlusions = get_occlusion_transforms(split, cfg)
 
         self.categories = self._load_categories(cfg.shapenet.categories)
         self.models = self._gather_models()
@@ -391,6 +410,7 @@ class ABO(ObjectDataset):
         self.data_root = cfg.abo.path
 
         self.transform = get_transforms(split, cfg)
+        self.transform_occlusions = get_occlusion_transforms(split, cfg)
 
         self.models = self._gather_models()
 

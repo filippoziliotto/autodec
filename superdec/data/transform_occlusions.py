@@ -1,8 +1,8 @@
-import open3d as o3d
+from scipy.spatial import ConvexHull
 import random
 import numpy as np
 from .transform import PointCloudsTransform
-import time
+from superoptim.utils import timing
 
 def get_random_camera(points):
     bbox_min = points[:, :3].min(axis=0)
@@ -53,22 +53,18 @@ class BackFaceCulling(PointCloudsTransform):
         self.threshold = threshold
         self.keep_points_without_normals = keep_points_without_normals
 
-    def get_params(self):
-        if self.camera_position is None:
-            camera_pos = get_random_camera(points)
-        else:
-            camera_pos = np.array(self.camera_position)
-        
-        return {"camera_position": camera_pos}
-
     @property
     def targets_as_params(self):
         return ["points", "normals"]
 
+    # @timing
     def get_params_dependent_on_targets(self, params):
         points = params["points"]
         normals = params.get("normals", None)
-        camera_pos = self.get_params()["camera_position"]
+        if self.camera_position is None:
+            camera_pos = get_random_camera(points)
+        else:
+            camera_pos = np.array(self.camera_position)
         
         # Compute view direction for each point
         view_directions = camera_pos - points[:, :3]
@@ -349,13 +345,31 @@ class HRPOcclusion(PointCloudsTransform):
         
         return {"mask": mask, "camera_position": camera_pos}
 
+    # @timing
     def _compute_mask(self, points, camera_pos):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        
-        diameter = np.linalg.norm(np.asarray(pcd.get_max_bound()) - np.asarray(pcd.get_min_bound()))
+        diameter = np.linalg.norm( points.max(axis=0) - points.min(axis=0))
         radius = diameter * self.radius_multiplier # large multiplier since we have a dense pointcloud (can cause false positives)
-        _, visible_indices = pcd.hidden_point_removal(camera_pos, radius)
+        
+        # Translate points relative to camera
+        p = points - camera_pos
+        norms = np.linalg.norm(p, axis=1)
+        
+        # Invert points
+        valid = norms > 1e-8
+        p_inv = np.zeros_like(p)
+        p_inv[valid] = p[valid] * ((2 * radius - norms[valid]) / norms[valid])[:, None]
+        
+        # Add camera at origin
+        p_inv_with_cam = np.vstack([p_inv, np.zeros((1, 3))])
+        
+        try:
+            hull = ConvexHull(p_inv_with_cam)
+            visible_indices = hull.vertices
+            # Remove the camera index (which is the last element)
+            visible_indices = visible_indices[visible_indices < len(points)]
+        except Exception:
+            # Fallback if convex hull fails (e.g., coplanar points)
+            visible_indices = np.arange(len(points))
         
         mask = np.zeros(len(points), dtype=bool)
         mask[visible_indices] = True
