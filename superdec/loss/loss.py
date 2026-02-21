@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from superdec.loss.sampler import EqualDistanceSamplerSQ
 from superdec.utils.transforms import transform_to_primitive_frame, quat2mat, mat2quat
@@ -185,8 +186,56 @@ class SuperDecLoss(BaseLoss):
 class ParamLoss(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.w_param = getattr(cfg, 'w_param', 1.0)
-        self.initial_w_param = self.w_param
+        self.w_exist = getattr(cfg, 'w_exist', 1.0)
+        self.w_scale = getattr(cfg, 'w_scale', 1.0)
+        self.w_shape = getattr(cfg, 'w_shape', 1.0)
+        self.w_trans = getattr(cfg, 'w_trans', 1.0)
+        self.w_rot = getattr(cfg, 'w_rot', 1.0)
+        self.w_tapering = getattr(cfg, 'w_tapering', 1.0)
+        self.w_bending = getattr(cfg, 'w_bending', 1.0)
+        
+    def scale_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 3.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 3 + 1e-6)
+
+    def shape_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 2.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+
+    def trans_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 3.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 3 + 1e-6)
+
+    def rot_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 4.0
+        
+        # Geodesic distance (angle in radians)
+        dot = torch.abs((pred * gt).sum(dim=-1))  # (B, P)
+        dot = torch.clamp(dot, -1.0 + 1e-6, 1.0 - 1e-6)
+        theta = 2.0 * torch.acos(dot).unsqueeze(-1)  # (B, P)
+        loss = theta ** 2
+        return (loss * mask).sum() / (mask.sum() + 1e-6)
+
+    def tapering_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 2.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+
+    def bending_mse(self, pred_k, pred_a, gt, mask=None):
+        B, P = pred_k.shape[:2]
+        pred = torch.stack([pred_k, pred_a], dim=-1).reshape(B, P, 6)
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 6.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 6 + 1e-6)
     
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
@@ -194,61 +243,92 @@ class ParamLoss(nn.Module):
         gt_trans = batch['gt_trans'].cuda().float()
         gt_rotate = batch['gt_rotate'].cuda().float()
         gt_exist = batch['gt_exist'].cuda().float()
+        if 'tapering' in out_dict:
+            gt_tapering = batch['gt_tapering'].cuda().float()
+        if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            gt_bending = batch['gt_bending'].cuda().float()
+
+        B, P = gt_scale.shape[:2]
+        with torch.no_grad():
+            # Compute cost matrix
+            cost_scale = self.w_scale * self.scale_mse(out_dict['scale'], gt_scale)
+            cost_shape = self.w_shape * self.shape_mse(out_dict['shape'], gt_shape)
+            cost_trans = self.w_trans * self.trans_mse(out_dict['trans'], gt_trans)
+            cost_rot = self.w_rot * self.rot_mse(out_dict['rotate_q'], gt_rotate)
+            cost_param = cost_scale + cost_shape + cost_trans + cost_rot
+            
+            if 'tapering' in out_dict:
+                cost_tapering = self.w_tapering * self.tapering_mse(out_dict['tapering'], gt_tapering)
+                cost_param += cost_tapering
+                
+            if 'bending_k' in out_dict and 'bending_a' in out_dict:
+                cost_bending = self.w_bending * self.bending_mse(out_dict['bending_k'], out_dict['bending_a'], gt_bending)
+                cost_param += cost_bending
+                
+            cost_exist = self.w_exist * torch.abs(out_dict['exist'].view(B, P, 1) - gt_exist.view(B, 1, P))
+            C = cost_exist + cost_param #* gt_exist.view(B, 1, P)
+            C_np = C.cpu().numpy()
+            
+            indices = []
+            for b in range(B):
+                row_ind, col_ind = linear_sum_assignment(C_np[b])
+                indices.append(col_ind)
+                
+            indices = torch.tensor(np.array(indices), device=gt_scale.device)
+            batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
+            gt_scale = gt_scale[batch_idx, indices]
+            gt_shape = gt_shape[batch_idx, indices]
+            gt_trans = gt_trans[batch_idx, indices]
+            gt_rotate = gt_rotate[batch_idx, indices]
+            gt_exist = gt_exist[batch_idx, indices]
+            if 'tapering' in out_dict:
+                gt_tapering = gt_tapering[batch_idx, indices]
+            if 'bending_k' in out_dict and 'bending_a' in out_dict:
+                gt_bending = gt_bending[batch_idx, indices]
         
         loss = 0
         loss_dict = {}            
         mask = (gt_exist > 0.5).float()
 
         # Existance (binary cross-entropy)
-        exist_loss = nn.BCELoss()(out_dict['exist'], gt_exist)
+        exist_loss = self.w_exist * nn.BCELoss()(out_dict['exist'], gt_exist)
         loss += exist_loss
         loss_dict['param_exist'] = exist_loss.item()
         
         # Scale
-        scale_loss = nn.MSELoss(reduction='none')(out_dict['scale'], gt_scale) # [B, P, 3]
-        scale_loss = (scale_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
+        scale_loss = self.w_scale * self.scale_mse(out_dict['scale'], gt_scale, mask)
         loss += scale_loss
         loss_dict['param_scale'] = scale_loss.item()
         
         # Shape
-        shape_loss = nn.MSELoss(reduction='none')(out_dict['shape'], gt_shape) # [B, P, 2]
-        shape_loss = (shape_loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+        shape_loss = self.w_shape * self.shape_mse(out_dict['shape'], gt_shape, mask)
         loss += shape_loss
         loss_dict['param_shape'] = shape_loss.item()
         
         # Translation
-        trans_loss = nn.MSELoss(reduction='none')(out_dict['trans'], gt_trans) # [B, P, 3]
-        trans_loss = (trans_loss * mask).sum() / (mask.sum() * 3 + 1e-6)
+        trans_loss = self.w_trans * self.trans_mse(out_dict['trans'], gt_trans, mask)
         loss += trans_loss
         loss_dict['param_trans'] = trans_loss.item()
         
         # Rotation
-        rot_loss = nn.MSELoss(reduction='none')(out_dict['rotate'], gt_rotate) # [B, P, 3, 3]
-        rot_loss = (rot_loss * mask.unsqueeze(-1)).sum() / (mask.sum() * 9 + 1e-6)
+        rot_loss = self.w_rot * self.rot_mse(out_dict['rotate_q'], gt_rotate, mask)
         loss += rot_loss
         loss_dict['param_rot'] = rot_loss.item()
 
         # Tapering
         if 'tapering' in out_dict:
-            gt_tapering = batch['gt_tapering'].cuda().float()
-            tapering_loss = nn.MSELoss(reduction='none')(out_dict['tapering'], gt_tapering)
-            tapering_loss = (tapering_loss * mask).sum() / (mask.sum() * tapering_loss.shape[-1] + 1e-6)
+            tapering_loss = self.w_tapering * self.tapering_mse(out_dict['tapering'], gt_tapering, mask)
             loss += tapering_loss
             loss_dict['param_tapering'] = tapering_loss.item()
 
         # Bending
         if 'bending_k' in out_dict and 'bending_a' in out_dict:
-            gt_bending = batch['gt_bending'].cuda().float()  # [B, P, 6]
-            bending_pred = torch.stack([out_dict['bending_k'], out_dict['bending_a']], dim=-1).reshape(gt_bending.shape)
-
-            bend_loss = nn.MSELoss(reduction='none')(bending_pred, gt_bending)
-            bend_loss = (bend_loss * mask).sum() / (mask.sum() * 6 + 1e-6)
+            bend_loss = self.w_bending * self.bending_mse(out_dict['bending_k'], out_dict['bending_a'], gt_bending, mask)
             loss += bend_loss
             loss_dict['param_bending'] = bend_loss.item()
         
-        total_loss = self.w_param * loss
-        loss_dict['all'] = total_loss.item()
-        return total_loss, loss_dict
+        loss_dict['all'] = loss.item()
+        return loss, loss_dict
 
 class IoULoss(BaseLoss):
     def __init__(self, cfg):

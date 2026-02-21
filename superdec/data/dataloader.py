@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import Dataset
 from torch_geometric.nn import fps
 
+from superdec.utils.transforms import mat2quat
 from superdec.data.transform import RotateAroundAxis3d, Scale3d, RandomMove3d, Compose, rotate_around_axis
 
 SHAPENET_CATEGORIES = {
@@ -271,11 +272,12 @@ class ObjectDataset(Dataset):
             gt_trans = (gt_trans - translation_np) / res['scale']
             gt_scale = gt_scale / res['scale']
 
+            rot_mat = torch.from_numpy(gt_rotate).unsqueeze(0).float()
             res.update({
                 'gt_scale': torch.from_numpy(gt_scale).float(),
                 'gt_shape': torch.from_numpy(gt_shape).float(),
                 'gt_trans': torch.from_numpy(gt_trans).float(),
-                'gt_rotate': torch.from_numpy(gt_rotate).float(),
+                'gt_rotate': mat2quat(rot_mat).squeeze(0),
                 'gt_exist': torch.from_numpy(gt_exist).float(),
                 'gt_tapering': torch.from_numpy(gt_tapering).float(),
                 'gt_bending': torch.from_numpy(gt_bending).float(),
