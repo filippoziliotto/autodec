@@ -5,7 +5,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from superdec.superdec import SuperDec
-from superdec.utils.predictions_handler import PredictionHandler
+from superdec.utils.predictions_handler_extended import PredictionHandler
 from superdec.utils.evaluation import get_outdict, build_dataloader
 from superdec.loss.loss import Loss
 from superdec.data.dataloader import ShapeNet, denormalize_outdict, denormalize_points

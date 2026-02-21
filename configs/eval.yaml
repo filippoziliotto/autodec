@@ -1,10 +1,10 @@
-checkpoints_folder: #PATH TO CHECKPOINT FOLDER
-checkpoint_file: # NAME of CHECKPOINT FILE
+checkpoints_folder: checkpoints/shapenet
+checkpoint_file: ckpt.pt
 config_file: config.yaml # NAME of CONFIG FILE
 device: "cuda"
 dataloader:
   dataset: shapenet 
-  batch_size: 128
+  batch_size: 96
   num_workers: 4
 shapenet:
   split: test

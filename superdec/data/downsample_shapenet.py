@@ -50,7 +50,7 @@ def gather_model_paths(data_root):
 def main():
     parser = argparse.ArgumentParser(description="Downsample ShapeNet pointclouds to 4096 using Open3D (parallel)")
     parser.add_argument("--data-root", default="data/ShapeNet", help="root folder containing ShapeNet categories")
-    parser.add_argument("--jobs", type=int, default=32, help="number of parallel worker processes (default: cpu count)")
+    parser.add_argument("--jobs", type=int, default=64, help="number of parallel worker processes (default: cpu count)")
     args = parser.parse_args()
 
     model_paths = gather_model_paths(args.data_root)

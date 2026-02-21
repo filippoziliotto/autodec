@@ -188,7 +188,7 @@ class Scene(Dataset):
 class ObjectDataset(Dataset):
     """Shared helpers for ShapeNet/ABO pointcloud-style datasets."""
     def __init__(self, split: str, cfg):
-        self.normalize = cfg.normalize
+        self.normalize = getattr(cfg, 'normalize', False)
         self.use_fps = getattr(cfg, 'use_fps', False)
         self.load_occupancy = getattr(cfg, 'load_occupancy', False)
         self.gt_params_path = getattr(cfg, f'gt_{split}_path', None)

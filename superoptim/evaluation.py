@@ -1,9 +1,11 @@
+import torch
 import torch.nn as nn
 import trimesh
 import numpy as np
 from scipy.spatial import KDTree
 from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO
 from torch.utils.data import DataLoader, Subset
+from superdec.utils.safe_operations import safe_pow, safe_mul
 
 def build_dataloader(cfg):
     if cfg.dataloader.dataset == 'shapenet':
@@ -175,3 +177,142 @@ def get_outdict(pc_gt, normals_gt, pc_pred, normals_pred):
             'f-score-20': F[19], # threshold = 2.0%
         }
     return out_dict_cur
+
+def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
+    """Compute per-primitive SDFs for a batch of objects from a PredictionHandler.
+
+    Args:
+        pred_handler: PredictionHandler with primitive parameters stored as numpy arrays.
+        indices: list of object indices to evaluate (length B).
+        points: torch tensor or numpy array with shape (B, M, 3) of query points.
+        device: torch device string.
+
+    Returns:
+        sdfs: torch tensor of shape (B, N, M) with per-primitive SDF values.
+    """
+    if isinstance(points, np.ndarray):
+        points = torch.tensor(points, dtype=torch.float32, device=device)
+    else:
+        points = points.to(device=device, dtype=torch.float32)
+
+    B = len(indices)
+    M = points.shape[1]
+    N = pred_handler.scale.shape[1]
+
+    scales = torch.stack([torch.tensor(pred_handler.scale[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    exps = torch.stack([torch.tensor(pred_handler.exponents[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    R = torch.stack([torch.tensor(pred_handler.rotation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    t = torch.stack([torch.tensor(pred_handler.translation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    taper = torch.stack([torch.tensor(pred_handler.tapering[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    bending = torch.stack([torch.tensor(pred_handler.bending[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+
+    # Prepare points: (B, M, 3) -> (B, 1, 3, M)
+    points_expanded = points.permute(0, 2, 1).unsqueeze(1)
+    t_uns = t.unsqueeze(-1)
+    points_centered = points_expanded - t_uns
+
+    # Rotate into local primitive frames: (B,N,3,M)
+    X = torch.matmul(R.transpose(-2, -1), points_centered)
+
+    e1 = exps[..., 0].unsqueeze(-1)
+    e2 = exps[..., 1].unsqueeze(-1)
+    sx = scales[..., 0].unsqueeze(-1)
+    sy = scales[..., 1].unsqueeze(-1)
+    sz = scales[..., 2].unsqueeze(-1)
+
+    x = X[:, :, 0, :]
+    y = X[:, :, 1, :]
+    z = X[:, :, 2, :]
+
+    eps = 1e-6
+    x = torch.where(x > 0, 1.0, -1.0) * torch.clamp(torch.abs(x), min=eps)
+    y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
+    z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
+
+    kx = taper[..., 0].unsqueeze(-1)
+    ky = taper[..., 1].unsqueeze(-1)
+
+    fx = safe_mul(kx / sz, z) + 1
+    fy = safe_mul(ky / sz, z) + 1
+
+    fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
+    fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
+
+    x = x / fx
+    y = y / fy
+
+    # Bending stored as [kb_z, alpha_z, kb_x, alpha_x, kb_y, alpha_y]
+    kb = bending[..., 0::2]
+    alpha = bending[..., 1::2]
+
+    def inverse_bending_axis(x, y, z, kb_axis, alpha_axis, axis):
+        if axis == 'z':
+            u, v, w = x, y, z
+        elif axis == 'x':
+            u, v, w = y, z, x
+        elif axis == 'y':
+            u, v, w = z, x, y
+        else:
+            return x, y, z
+
+        inv_kb = 1.0 / (kb_axis + 1e-6)
+
+        angle_offset = torch.atan2(v, u)
+        Rval = torch.sqrt(u**2 + v**2) * torch.cos(alpha_axis - angle_offset)
+        gamma = torch.atan2(w, inv_kb - Rval)
+        r = inv_kb - torch.sqrt(w**2 + (inv_kb - Rval)**2)
+
+        u = u - (Rval - r) * torch.cos(alpha_axis)
+        v = v - (Rval - r) * torch.sin(alpha_axis)
+        w = inv_kb * gamma
+
+        if axis == 'z':
+            return u, v, w
+        elif axis == 'x':
+            return w, u, v
+        elif axis == 'y':
+            return v, w, u
+
+    x, y, z = inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
+    x, y, z = inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
+    x, y, z = inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
+
+    r0 = torch.sqrt(x**2 + y**2 + z**2)
+
+    term1 = safe_pow(safe_pow(x / sx, 2), 1 / e2)
+    term2 = safe_pow(safe_pow(y / sy, 2), 1 / e2)
+    term3 = safe_pow(safe_pow(z / sz, 2), 1 / e1)
+
+    f_func = safe_pow(safe_pow(term1 + term2, e2 / e1) + term3, -e1 / 2)
+
+    sdf = safe_mul(r0, (1 - f_func))
+    return sdf
+
+def compute_ious_sdf(pred_handler, indices, points_iou, occupancies, device='cuda'):
+    """Compute IoU per object using SDF union from `pred_handler` parameters.
+
+    Args:
+        pred_handler: PredictionHandler
+        indices: list of indices (length B)
+        points_iou: torch tensor shape (B, M, 3) on the target device
+        occupancies: torch tensor shape (B, M) bool
+        device: device string
+
+    Returns:
+        numpy array of IoUs length B
+    """
+    assert occupancies.dtype == torch.bool
+    
+    sdfs = sdfs_from_pred_handler(pred_handler, indices, points_iou, device=device)
+    # mask out non-existing primitives
+    exist_masks = torch.stack([torch.tensor(pred_handler.exist[i] > 0.5, dtype=torch.bool, device=device) for i in indices], dim=0)
+    mask = exist_masks.expand_as(sdfs)
+    sdfs[~mask] = float('inf')
+
+    min_sdf, _ = torch.min(sdfs, dim=1)
+    pred_occ = (min_sdf <= 0)
+
+    intersection = (pred_occ & occupancies).sum(dim=1).float()
+    union = (pred_occ | occupancies).sum(dim=1).float()
+    ious = (intersection / torch.clamp(union, min=1e-6)).cpu().numpy()
+    return ious

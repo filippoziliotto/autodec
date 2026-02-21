@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 from omegaconf import OmegaConf
 
 from superdec.data.dataloader import ShapeNet, ABO
-from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader
+from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader, compute_ious_sdf
 
 def main(cfg: DictConfig):
     module_type = cfg.get('type', 'iou_bend')
@@ -37,6 +37,7 @@ def main(cfg: DictConfig):
     
     # Build dataloader from config (expects cfg.dataloader.*)
     dataloader = build_dataloader(cfg)
+    assert dataloader.dataset.normalize == False, "Eval dataset should not be normalized."
     # Sanity-check: ensure prediction names align with dataset model_ids
     dataset_names = [m['model_id'] for m in dataloader.dataset.models]
     assert np.array_equal(pred_handler.names, dataset_names), (
@@ -142,22 +143,6 @@ def main(cfg: DictConfig):
                     if hasattr(superq, "raw_bending"):
                         superq.raw_bending[b].copy_(best_params[b]["raw_bending"])
 
-        # Compute IoU using SDF
-        all_points_t = points_iou.transpose(1, 2)
-        all_occ_t = occupancies
-        if all_occ_t.dtype == torch.uint8: all_occ_t = all_occ_t.bool()
-
-        with torch.no_grad():
-            sdfs = superq.sdf_batch(all_points_t) # (B, N, M)
-            mask = superq.exist_mask.unsqueeze(-1).expand_as(sdfs)
-            sdfs[~mask] = float('inf')
-            min_sdf, _ = torch.min(sdfs, dim=1) # (B, M)
-            pred_occ = (min_sdf <= 0)
-        
-        intersection = (pred_occ & all_occ_t).sum(dim=1).float()
-        union = (pred_occ | all_occ_t).sum(dim=1).float()
-        batch_ious = (intersection / torch.clamp(union, min=1e-6)).cpu().numpy()
-
         superq.update_handler(compute_meshes=False)
         
         # Cleanup to avoid OOM
@@ -169,8 +154,12 @@ def main(cfg: DictConfig):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        
+        # Compute IoU using SDF
+        with torch.no_grad():
+            batch_ious = compute_ious_sdf(pred_handler, batch_indices, points_iou, occupancies, device=device)
 
-        # Evaluate
+        # Evaluate mesh
         for b_idx in range(len(batch_indices)):
             idx = batch_indices[b_idx]
             try:
