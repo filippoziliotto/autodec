@@ -40,7 +40,7 @@ class BatchSuperQMulti(nn.Module):
         self.enable_tapering = self._parse_flag('tapering', True)
         self.enable_bending = self._parse_flag('bending', True)
         self.enable_reorient = self._parse_flag('reorient', True)
-        self.enable_pruning = self._parse_flag('reorient', False)
+        self.enable_pruning = self._parse_flag('pruning', False)
 
         B = len(indices)
         self.N_max = pred_handler.scale.shape[1]
@@ -425,11 +425,13 @@ class BatchSuperQMulti(nn.Module):
         return (counts_points <= 5) & self.exist_mask
 
     def update_handler(self, denormalize=True, compute_meshes=True):
-        if self.enable_pruning:
-            self.exist_mask &= ~self.prune()
-            prune_mask = prune_mask.cpu()
+        # if self.enable_pruning:
+        #     prune_mask = self.prune()
+        #     print(f"Pruning {prune_mask.sum()} superquadrics")
+        #     self.exist_mask &= ~prune_mask
+        #     prune_mask = prune_mask.cpu()
         for i, idx in enumerate(self.indices):
-            if self.enable_pruning: self.pred_handler.exist[idx][prune_mask[i]] = 0.
+            # if self.enable_pruning: self.pred_handler.exist[idx][prune_mask[i]] = 0.
             mask = self.exist_mask[i].cpu().numpy()
             if not np.any(mask): continue
             
