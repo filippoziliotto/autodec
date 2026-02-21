@@ -53,6 +53,7 @@ def get_transforms(split: str, cfg):
         return None
 
     return Compose([
+        Scale3d(),
         RotateAroundAxis3d(rotation_limit=np.pi / 24, axis=(0, 0, 1)),
         RotateAroundAxis3d(rotation_limit=np.pi / 24, axis=(1, 0, 0)),
         RotateAroundAxis3d(rotation_limit=np.pi, axis=(0, 1, 0)),
@@ -233,6 +234,16 @@ class ObjectDataset(Dataset):
         points = pc_data["points"][idxs]
         normals = pc_data["normals"][idxs]
         return points, normals, pc_data
+    
+    def _decompose_augmentation_matrix(self, res):
+        aug_matrix = res['aug_matrix'].numpy()
+        R_aug = aug_matrix[:3, :3]
+        t_aug = aug_matrix[:3, 3]
+        
+        # Extract scale and normalize rotation matrix
+        aug_scale = np.linalg.norm(R_aug, axis=1)
+        R_aug_norm = R_aug / aug_scale[:, None]
+        return R_aug_norm, t_aug, aug_scale
 
     def _add_occupancy_and_gt(self, res, model_id, model_path):
         # occupancy / points_iou
@@ -249,6 +260,9 @@ class ObjectDataset(Dataset):
                     translation_np = res['translation'].numpy() if isinstance(res['translation'], torch.Tensor) else res['translation']
                     scale_iou = res['scale']
                     points_iou = (points_iou - translation_np) / scale_iou
+
+                R_aug, t_aug, s_aug = self._decompose_augmentation_matrix(res)
+                points_iou = points_iou @ R_aug.T * s_aug + t_aug
 
                 res.update({
                     'points_iou': torch.from_numpy(points_iou).float(),
@@ -272,18 +286,18 @@ class ObjectDataset(Dataset):
             gt_trans = (gt_trans - translation_np) / res['scale']
             gt_scale = gt_scale / res['scale']
 
-            aug_matrix = res['aug_matrix'].numpy()
-            R_aug = aug_matrix[:3, :3]
-            t_aug = aug_matrix[:3, 3]
-            gt_trans = gt_trans @ R_aug.T + t_aug
+            R_aug, t_aug, s_aug = self._decompose_augmentation_matrix(res)
+            gt_trans = gt_trans @ R_aug.T * s_aug + t_aug
             gt_rotate = R_aug @ gt_rotate
+            gt_scale = gt_scale * s_aug
 
-            rot_mat = torch.from_numpy(gt_rotate).unsqueeze(0).float()
+            rot_mat = torch.from_numpy(gt_rotate).float()
             res.update({
                 'gt_scale': torch.from_numpy(gt_scale).float(),
                 'gt_shape': torch.from_numpy(gt_shape).float(),
                 'gt_trans': torch.from_numpy(gt_trans).float(),
-                'gt_rotate': mat2quat(rot_mat).squeeze(0),
+                'gt_rotate': rot_mat,
+                'gt_rotate_q': mat2quat(rot_mat.unsqueeze(0)).squeeze(0),
                 'gt_exist': torch.from_numpy(gt_exist).float(),
                 'gt_tapering': torch.from_numpy(gt_tapering).float(),
                 'gt_bending': torch.from_numpy(gt_bending).float(),
@@ -377,7 +391,6 @@ class ABO(ObjectDataset):
         self.data_root = cfg.abo.path
 
         self.transform = get_transforms(split, cfg)
-        self.normalize = cfg.abo.normalize
 
         self.models = self._gather_models()
 

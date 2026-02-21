@@ -568,14 +568,14 @@ class RandomMove3d(Move3d):
             "z_max": self.z_max,
         }
 class Scale3d(PointCloudsTransform):
-    """Scale the input point cloud.
+    """Scale the input point cloud uniformly.
 
     Args:
-        scale_limit (float, float, float): maximum scaling of input point cloud.
-            Default: (0.1, 0.1, 0.1).
-        bias (list(float, float, float)): base scaling that is always applied.
-            List of 3 values to determine the basic scaling. Default: (1, 1, 1).
-        p (float): probability of applying the transform. Default: 0.5.
+        scale_limit (float): maximum scaling of input point cloud.
+            Default: 0.5.
+        bias (float): base scaling that is always applied.
+            Default: 1.0.
+        p (float): probability of applying the transform. Default: 1.0.
 
     Targets:
         points
@@ -586,21 +586,31 @@ class Scale3d(PointCloudsTransform):
     """
 
     def __init__(
-        self, scale_limit=(0.1, 0.1, 0.1), bias=(1, 1, 1), always_apply=False, p=0.5
+        self, scale_limit=0.5, bias=1.0, always_apply=False, p=1.
     ):
         super().__init__(always_apply, p)
-        self.scale_limit = []
-        for limit, bias_for_axis in zip(scale_limit, bias):
-            self.scale_limit.append(to_tuple(limit, bias=bias_for_axis))
+        self.scale_limit = to_tuple(scale_limit, bias=bias)
 
     def get_params(self):
-        scale = []
-        for limit in self.scale_limit:
-            scale.append(random.uniform(limit[0], limit[1]))
-        return {"scale": scale}
+        s = random.uniform(self.scale_limit[0], self.scale_limit[1])
+        return {"scale": (s, s, s)}
 
     def apply(self, points, scale=(1, 1, 1), **params):
         return f_scale(points, scale)
+
+    def apply_to_transform_info(self, transform_info, scale=(1, 1, 1), **params):
+        if transform_info is None:
+            return None
+        
+        S = np.eye(4)
+        S[0, 0] = scale[0]
+        S[1, 1] = scale[1]
+        S[2, 2] = scale[2]
+        
+        cur_M = transform_info.get('matrix', np.eye(4))
+        transform_info['matrix'] = S @ cur_M
+        
+        return transform_info
 
     def apply_to_normals(self, normals, **params):
         return normals

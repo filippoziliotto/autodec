@@ -241,7 +241,7 @@ class ParamLoss(nn.Module):
         gt_scale = batch['gt_scale'].cuda().float()
         gt_shape = batch['gt_shape'].cuda().float()
         gt_trans = batch['gt_trans'].cuda().float()
-        gt_rotate = batch['gt_rotate'].cuda().float()
+        gt_rotate = batch['gt_rotate_q'].cuda().float()
         gt_exist = batch['gt_exist'].cuda().float()
         if 'tapering' in out_dict:
             gt_tapering = batch['gt_tapering'].cuda().float()

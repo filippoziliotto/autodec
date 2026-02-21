@@ -9,6 +9,7 @@ from omegaconf import OmegaConf
 
 from superdec.data.dataloader import ShapeNet, ABO
 from superdec.utils.predictions_handler_extended import PredictionHandler
+from superoptim.evaluation import get_outdict, eval_mesh, compute_ious_sdf
 
 def visualize_item(server, item):
     # Clear previous items
@@ -24,6 +25,17 @@ def visualize_item(server, item):
         colors=colors,
         point_size=0.01,
     )
+
+    if 'points_iou' in item:
+        iou_occ_points = np.array(item['points_iou'][item['occupancies'] > 0])
+        green_colors = np.tile(np.array([0.0, 1.0, 0.0]), (iou_occ_points.shape[0], 1))
+        server.scene.add_point_cloud(
+            name="/iou_occupied_points",
+            points=iou_occ_points,
+            colors=green_colors,
+            point_size=0.005,
+            visible=True,
+        )
 
     # Visualize GT superquadrics if available
     if 'gt_scale' in item:
@@ -41,17 +53,23 @@ def visualize_item(server, item):
         bending = item['gt_bending'].numpy()
 
         # Create dummy handler
-        handler = PredictionHandler(
-            scale=np.expand_dict(scale, 0),
-            shape=np.expand_dict(shape, 0),
-            trans=np.expand_dict(trans, 0),
-            rotate=np.expand_dict(rotate, 0),
-            exist=np.expand_dict(exist, 0),
-            tapering=np.expand_dict(tapering, 0),
-            bending=np.expand_dict(bending, 0),
-            names=[item['model_id']]
-        )
+        handler = PredictionHandler({
+            'assign_matrix': np.zeros((1, 16, 4096)),
+            'pc':np.expand_dims(points, 0),
+            'scale':np.expand_dims(scale, 0),
+            'exponents':np.expand_dims(shape, 0),
+            'translation':np.expand_dims(trans, 0),
+            'rotation':np.expand_dims(rotate, 0),
+            'exist':np.expand_dims(exist, 0),
+            'tapering':np.expand_dims(tapering, 0),
+            'bending':np.expand_dims(bending, 0),
+            'names':[item['model_id']]
+        })
 
+        if 'points_iou' in item:
+            batch_ious = compute_ious_sdf(handler, [0], item['points_iou'].unsqueeze(0), item['occupancies'].unsqueeze(0), device='cpu')
+            print("IoU:", batch_ious)
+        
         # Get mesh and add to scene
         mesh = handler.get_mesh(0, resolution=30)
         server.scene.add_mesh_trimesh("gt_superquadrics", mesh=mesh, visible=True)
@@ -60,14 +78,28 @@ def visualize_item(server, item):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize dataset items")
-    parser.add_argument("--dataset", type=str, default="shapenet", choices=["shapenet", "abo"], help="Dataset to use")
+    parser.add_argument("--dataset", type=str, default="abo", choices=["shapenet", "abo"], help="Dataset to use")
     parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"], help="Dataset split")
     parser.add_argument("--index", type=int, default=0, help="Index of the item to visualize")
-    parser.add_argument("--config", type=str, default="configs/mamba.toml", help="Path to config file")
     args = parser.parse_args()
 
-    # Load config
-    cfg = OmegaConf.load(args.config)
+    cfg = OmegaConf.create({
+        'shapenet': {
+            'path': 'data/ShapeNet',
+            'gt_train_path': 'data/output_npz/shapenet/shapenet_train_optimized_iou_bend.npz',
+            # 'normalize': True,
+            'load_occupancy': True,
+            'use_fps': True,
+        },
+        'abo': {
+            'path': 'data/ABO/processed-complete',
+            'gt_train_path': 'data/output_npz/abo/abo_train_optimized_iou_bend.npz',
+            # 'normalize': True,
+            'load_occupancy': True,
+            'use_fps': True,
+        },
+        'trainer': { 'augmentations': True }
+    })
 
     # Initialize dataset
     if args.dataset == "shapenet":
