@@ -64,7 +64,6 @@ class BatchSuperQMulti(nn.Module):
         self.raw_exponents = nn.Parameter(torch.stack(exp_list)) # (B, N, 2)
         self.raw_rotation = nn.Parameter(torch.stack(rot_list)) # (B, N, 4)
         self.translation = nn.Parameter(torch.stack(trans_list)) # (B, N, 3)
-        self.raw_tapering = nn.Parameter(torch.full((B, self.N_max, 2), 1e-4, dtype=torch.float, device=device))
         
         self.exist_mask = torch.stack(self.masks) # (B, N)
 
@@ -79,10 +78,6 @@ class BatchSuperQMulti(nn.Module):
     @torch.compile  
     def rotation(self):
         return quat2mat(self.raw_rotation)
-
-    @torch.compile 
-    def tapering(self):
-        return self.raw_tapering
     
     def get_param_groups(self):
         groups = []
@@ -119,18 +114,6 @@ class BatchSuperQMulti(nn.Module):
         y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
         z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
         
-        kx = self.tapering()[..., 0].unsqueeze(-1)
-        ky = self.tapering()[..., 1].unsqueeze(-1)
-        
-        fx = safe_mul(kx/sz, z) + 1
-        fy = safe_mul(ky/sz, z) + 1
-        
-        fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
-        fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
-        
-        x = x / fx
-        y = y / fy
-        
         r0 = torch.sqrt(x**2 + y**2 + z**2)
         
         term1 = safe_pow(safe_pow(x / sx, 2), 1 / e2)
@@ -150,7 +133,6 @@ class BatchSuperQMulti(nn.Module):
             
             self.pred_handler.scale[idx][mask] = self.scale()[i][mask].detach().cpu().numpy()
             self.pred_handler.exponents[idx][mask] = self.exponents()[i][mask].detach().cpu().numpy()
-            self.pred_handler.tapering[idx][mask] = self.tapering()[i][mask].detach().cpu().numpy()
             self.pred_handler.rotation[idx][mask] = self.rotation()[i][mask].detach().cpu().numpy()
             self.pred_handler.translation[idx][mask] = self.translation[i][mask].detach().cpu().numpy()
             

@@ -16,7 +16,10 @@ from superdec.data.dataloader import ShapeNet, ABO
 from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader, compute_ious_sdf
 
 def main(cfg: DictConfig):
-    module_type = cfg.get('type', 'iou_bend')
+    print("\n========== SuperDec Evaluation ==========")
+    print("Config:\n" + OmegaConf.to_yaml(cfg))
+    
+    module_type = cfg.get('type', 'iou')
     prefix = cfg.get('prefix', 'shapenet/shapenet_test')
     small = cfg.get('small', False)
 
@@ -126,9 +129,10 @@ def main(cfg: DictConfig):
                             "raw_scale": superq.raw_scale[b].clone(),
                             "raw_exponents": superq.raw_exponents[b].clone(),
                             "raw_rotation": superq.raw_rotation[b].clone(),
-                            "raw_tapering": superq.raw_tapering[b].clone(),
                             "translation": superq.translation[b].clone()
                         }
+                        if hasattr(superq, "raw_tapering"):
+                            best_params[b]["raw_tapering"] = superq.raw_tapering[b].clone()
                         if hasattr(superq, "raw_bending"):
                             best_params[b]["raw_bending"] = superq.raw_bending[b].clone()
         
@@ -139,8 +143,9 @@ def main(cfg: DictConfig):
                     superq.raw_scale[b].copy_(best_params[b]["raw_scale"])
                     superq.raw_exponents[b].copy_(best_params[b]["raw_exponents"])
                     superq.raw_rotation[b].copy_(best_params[b]["raw_rotation"])
-                    superq.raw_tapering[b].copy_(best_params[b]["raw_tapering"])
                     superq.translation[b].copy_(best_params[b]["translation"])
+                    if hasattr(superq, "raw_tapering"):
+                        superq.raw_tapering[b].copy_(best_params[b]["raw_tapering"])
                     if hasattr(superq, "raw_bending"):
                         superq.raw_bending[b].copy_(best_params[b]["raw_bending"])
 

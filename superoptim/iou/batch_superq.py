@@ -77,10 +77,10 @@ class BatchSuperQMulti(nn.Module):
             # --- Points ---
             try:
                 if external_data is not None:
-                     pts_iou = external_data['points_iou'][i]
-                     occ = external_data['occupancies'][i]
-                     pts_surf = external_data['points'][i] # This is 4096 surface points
-                     pts = torch.cat([pts_iou, pts_surf], dim=0)
+                    pts_iou = external_data['points_iou'][i]
+                    occ = external_data['occupancies'][i]
+                    pts_surf = external_data['points'][i] # This is 4096 surface points
+                    pts = torch.cat([pts_iou, pts_surf], dim=0)
                 else:
                     ply = ply_paths[i] if ply_paths else None
                     points_file = ply.replace("pointcloud.npz", "points.npz")
