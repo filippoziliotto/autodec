@@ -87,7 +87,8 @@ def main(cfg: DictConfig):
                 'normals': normals,
                 'points_iou': points_iou,
                 'occupancies': occupancies
-            }
+            },
+            cfg=cfg.optimization
         )
         
         param_groups = superq.get_param_groups()

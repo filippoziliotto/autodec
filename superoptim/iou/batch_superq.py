@@ -13,7 +13,7 @@ from typing import Optional, assert_never
 from dataclasses import dataclass
 import gc
 
-from ..utils import quat2mat, mat2quat
+from ..utils import quat2mat, mat2quat, timing
 from superdec.utils.safe_operations import safe_pow, safe_mul
 from superdec.utils.predictions_handler_extended import PredictionHandler
 
@@ -25,15 +25,22 @@ class BatchSuperQMulti(nn.Module):
         ply_paths: list[str] = None,
         truncation: float = 0.05,
         device: str = "cuda",
-        external_data: dict = None
+        external_data: dict = None,
+        cfg: Optional[object] = None,
     ):
         super().__init__()
         self.indices = indices
         self.device = device
         self.truncation = truncation
         self.pred_handler = pred_handler
-        self.minS = 0.01
+        self.minS = 0.001
         self.minE, self.maxE = 0.1, 1.9
+        
+        self.cfg = cfg
+        self.enable_tapering = self._parse_flag('tapering', True)
+        self.enable_bending = self._parse_flag('bending', True)
+        self.enable_reorient = self._parse_flag('reorient', True)
+        self.enable_pruning = self._parse_flag('reorient', False)
 
         B = len(indices)
         self.N_max = pred_handler.scale.shape[1]
@@ -87,7 +94,7 @@ class BatchSuperQMulti(nn.Module):
                     pts_surf = torch.tensor(pred_handler.pc[idx], dtype=torch.float, device=device)
                     pts = torch.cat([pts_iou, pts_surf], dim=0)
             except Exception as e:
-                print(f"Error loading points: {e}")
+                print(f"Error loading {points_file}: {e}")
                 exit()
             
             # Ensure pts has correct shape if not loaded from ply
@@ -103,12 +110,86 @@ class BatchSuperQMulti(nn.Module):
         self.raw_rotation = nn.Parameter(torch.stack(rot_list)) # (B, N, 4)
         self.translation = nn.Parameter(torch.stack(trans_list)) # (B, N, 3)
         self.raw_tapering = nn.Parameter(torch.full((B, self.N_max, 2), 1e-4, dtype=torch.float, device=device))
+        raw_bending = torch.full((B, self.N_max, 6), 1e-3, dtype=torch.float, device=device)
+        raw_bending[..., 0::2] = torch.logit(raw_bending[..., 0::2])
+        self.raw_bending = nn.Parameter(raw_bending) # (B, N, 6)
+        self.normalize()
+        if self.enable_reorient:
+            self.reorient()
         
         self.exist_mask = torch.stack(self.masks) # (B, N)
         self.bbox_min = torch.min(self.points[:, self.M_points_iou:], dim=1).values.unsqueeze(1).unsqueeze(2)  # (B,3)
         self.bbox_max = torch.max(self.points[:, self.M_points_iou:], dim=1).values.unsqueeze(1).unsqueeze(2)  # (B,3)
         self.bbox_min -= (self.bbox_max - self.bbox_min) * .025
         self.bbox_max += (self.bbox_max - self.bbox_min) * .025
+
+    def _parse_flag(self, key, default=True):
+        if self.cfg is None:
+            return default
+        return bool(getattr(self.cfg, key))
+    
+    @torch.compile
+    def normalize(self):
+        # normalize based on surface points
+        surf_points = self.points[:, -self.M_points_surf:]
+        translation = torch.mean(surf_points, dim=1)  # (B,3)
+        self.points = self.points - translation.unsqueeze(1)
+
+        scale = 2 * torch.amax(torch.abs(surf_points), dim=(1, 2))  # (B,)
+        self.points = self.points / scale.view(-1, 1, 1)
+
+        self.normalization_translation = translation
+        self.normalization_scale = scale
+
+        with torch.no_grad():
+            self.translation.data = (self.translation.data - translation.unsqueeze(1)) / scale.view(-1, 1, 1)
+            # Update raw_scale so that scale() reflects the normalization
+            new_s = self.scale() / scale.view(-1, 1, 1)
+            self.raw_scale.data = torch.log(torch.clamp(new_s - self.minS, min=1e-6))
+        
+        return translation, scale
+    
+    @torch.compile
+    def reorient(self):
+        with torch.no_grad():
+            s = self.scale()       # (B,N,3)
+            R = self.rotation()    # (B,N,3,3)
+            
+            sx = s[..., 0]
+            sy = s[..., 1]
+            sz = s[..., 2]
+
+            ratio = 2.5
+            mask_swap_xz = (sx > ratio * sz) & (sx > ratio * sy)
+            mask_swap_yz = (sy > ratio * sz) & (sy > ratio * sx)
+
+            new_s = s.clone()
+            
+            if mask_swap_xz.any():
+                new_s[..., 0][mask_swap_xz] = sz[mask_swap_xz]
+                new_s[..., 2][mask_swap_xz] = sx[mask_swap_xz]
+                
+            if mask_swap_yz.any():
+                new_s[..., 1][mask_swap_yz] = sz[mask_swap_yz]
+                new_s[..., 2][mask_swap_yz] = sy[mask_swap_yz]
+
+            self.raw_scale.data = torch.log(torch.clamp(new_s - self.minS, min=1e-6))
+            
+            new_R = R.clone()
+
+            if mask_swap_xz.any():
+                u, v, w = R.unbind(-1) # Splits (B, N, 3, 3) into three (B, N, 3) tensors
+                new_u = torch.where(mask_swap_xz.unsqueeze(-1), -w, u)
+                new_w = torch.where(mask_swap_xz.unsqueeze(-1), u, w)
+                new_R = torch.stack([new_u, v, new_w], dim=-1)
+
+            if mask_swap_yz.any():
+                u, v, w = new_R.unbind(-1) # Splits (B, N, 3, 3) into three (B, N, 3) tensors
+                new_v = torch.where(mask_swap_yz.unsqueeze(-1), -w, v)
+                new_w = torch.where(mask_swap_yz.unsqueeze(-1), v, w)
+                new_R = torch.stack([u, new_v, new_w], dim=-1)
+
+            self.raw_rotation.data = mat2quat(new_R)
 
     @torch.compile
     def scale(self):
@@ -125,12 +206,22 @@ class BatchSuperQMulti(nn.Module):
     @torch.compile 
     def tapering(self):
         return torch.tanh(self.raw_tapering)
-
+    
+    @torch.compile
+    def bending(self):
+        # not accurate limit, but safe
+        tau = 0.01
+        max_scale = tau * torch.logsumexp(self.scale()/tau, keepdim=True, dim=-1)
+        kb = (torch.sigmoid(self.raw_bending[..., 0::2]) * 0.95) / max_scale 
+        alpha = torch.sigmoid(self.raw_bending[..., 1::2]) * 2 * torch.pi
+        return kb, alpha
+    
     def get_param_groups(self):
         lrs = {
             "raw_scale": 2e-2,
             "raw_exponents": 1e-2,
-            "raw_tapering": 5e-4,
+            "raw_tapering": 7e-3,
+            "raw_bending": 6e-3,
         }
         groups = []
         for name, param in self.named_parameters():
@@ -138,6 +229,36 @@ class BatchSuperQMulti(nn.Module):
             lr = lrs.get(name, 2e-3)
             groups.append({"params": [param], "lr": lr})
         return groups
+
+    @torch.compile
+    def inverse_bending_axis(self, x, y, z, kb, alpha, axis):
+        if axis == 'z':
+            u, v, w = x, y, z
+        elif axis == 'x':
+            u, v, w = y, z, x
+        elif axis == 'y':
+            u, v, w = z, x, y
+        else:
+             return x, y, z
+
+        # Precompute reciprocal efficiently
+        inv_kb = 1.0 / (kb + 1e-6)
+        
+        angle_offset = torch.atan2(v, u)
+        R = torch.sqrt(u**2 + v**2) * torch.cos(alpha - angle_offset)
+        gamma = torch.atan2(w, inv_kb - R)
+        r = inv_kb - torch.sqrt(w**2 + (inv_kb - R)**2)
+        
+        u = u - (R - r) * torch.cos(alpha)
+        v = v - (R - r) * torch.sin(alpha)
+        w = inv_kb * gamma
+
+        if axis == 'z':
+            return u, v, w
+        elif axis == 'x':
+            return w, u, v
+        elif axis == 'y':
+            return v, w, u
     
     @torch.compile
     def sdf_batch(self, points):
@@ -167,18 +288,27 @@ class BatchSuperQMulti(nn.Module):
         y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
         z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
         
-        kx = self.tapering()[..., 0].unsqueeze(-1)
-        ky = self.tapering()[..., 1].unsqueeze(-1)
-        
-        fx = safe_mul(kx/sz, z) + 1
-        fy = safe_mul(ky/sz, z) + 1
-        
-        fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
-        fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
-        
-        x = x / fx
-        y = y / fy
-        
+        # Apply tapering if enabled
+        if self.enable_tapering:
+            kx = self.tapering()[..., 0].unsqueeze(-1)
+            ky = self.tapering()[..., 1].unsqueeze(-1)
+            
+            fx = safe_mul(kx/sz, z) + 1
+            fy = safe_mul(ky/sz, z) + 1
+            
+            fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
+            fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
+            
+            x = x / fx
+            y = y / fy
+
+        # Apply bending if enabled
+        if self.enable_bending:
+            kb, alpha = self.bending()
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
+
         r0 = torch.sqrt(x**2 + y**2 + z**2)
         
         term1 = safe_pow(safe_pow(x / sx, 2), 1 / e2)
@@ -199,10 +329,15 @@ class BatchSuperQMulti(nn.Module):
         R = self.rotation()   # (B,N,3,3)
         t = self.translation  # (B,N,3)
         
-        taper = self.tapering() # (B,N,2)
-        sx = s[..., 0] * (1 + torch.abs(taper[..., 0]))
-        sy = s[..., 1] * (1 + torch.abs(taper[..., 1]))
-        sz = s[..., 2]
+        if self.enable_tapering:
+            taper = self.tapering() # (B,N,2)
+            sx = s[..., 0] * (1 + torch.abs(taper[..., 0]))
+            sy = s[..., 1] * (1 + torch.abs(taper[..., 1]))
+            sz = s[..., 2]
+        else:
+            sx = s[..., 0]
+            sy = s[..., 1]
+            sz = s[..., 2]
 
         local = torch.zeros(B, N, 6, 3, device=s.device)
         local[:,:,0,0] =  sx  # +x
@@ -222,9 +357,8 @@ class BatchSuperQMulti(nn.Module):
         poles_world = poles_world + t.unsqueeze(2)
         return poles_world
     
-    def compute_losses(self, forward_out):
-        sdfs = forward_out.get('sdfs')
-        
+    @torch.compile
+    def _compute_losses(self, sdfs, overlap):
         temperature = 1e-3
         sdfs_iou = sdfs[:, :self.M_points_iou]
         pred_occ = torch.sigmoid(-sdfs_iou / temperature)
@@ -238,20 +372,30 @@ class BatchSuperQMulti(nn.Module):
         temperature = 1e-2
         sdfs_surf = sdfs[:, self.M_points_iou:]
         sdfs_surf = (torch.sigmoid(sdfs_surf / temperature) - 0.5) * 2 * self.truncation
-        Lsdf = 8 * torch.mean(torch.abs(sdfs_surf), dim=1) # (B,)
+        # Lsdf = 8 * torch.mean(torch.abs(sdfs_surf), dim=1) # (B,)
+        # Lsdf = 16 * torch.mean(torch.relu(sdfs_surf), dim=1) # (B,)
+        Lsdf = 16 * torch.mean(torch.abs(torch.nn.LeakyReLU()(sdfs_surf)), dim=1) # (B,)
         
         poles = self.poles()   # (B,N,6,3)
         mask = self.exist_mask.unsqueeze(-1)
         violation = torch.relu(self.bbox_min - poles) + torch.relu(poles - self.bbox_max)   # (B,N,6,3)
         dist = torch.linalg.norm(violation, dim=-1)  # (B,N,6)
         L_bbox = (dist * mask).sum(dim=2).mean(dim=1)
+
+        L_overlap = 1e-1 * overlap.mean(dim=1)
         
-        loss = -torch.log(iou) + Lsdf + L_bbox
-        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_bbox}
+        loss = -torch.log(iou) + Lsdf + L_bbox + L_overlap
+        return loss, iou, Lsdf, L_overlap, L_overlap
     
+    def compute_losses(self, forward_out):
+        sdfs = forward_out.get('sdfs')
+        overlap = forward_out.get('overlap')
+        loss, iou, Lsdf, L_overlap, L_overlap = self._compute_losses(sdfs, overlap)
+        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_overlap, "overlap": L_overlap}
+
     def forward(self):
-        all_sdfs = self.sdf_batch(self.points.transpose(1, 2)) # (B, N, M_total)
-        
+        all_sdfs = self.sdf_batch(self.points.transpose(1, 2).contiguous()) # (B, N, M_total)
+    
         # mask out non-existing primitives
         mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
         all_sdfs[~mask] = float('inf')
@@ -260,23 +404,59 @@ class BatchSuperQMulti(nn.Module):
         # min_sdf, _ = torch.min(all_sdfs, dim=1) # (B, M)
         tau = 0.01  # smaller = sharper min
         min_sdf = -tau * torch.logsumexp(-all_sdfs / tau, dim=1)  # (B, M)
+
+        temperature = 1e-3
+        indicator = torch.sigmoid(-(all_sdfs+self.truncation) / temperature)
+        overlap = torch.sum(torch.relu(indicator), dim=1)
         return {
             'sdfs': min_sdf,
+            'overlap': overlap,
         }
 
-    def update_handler(self, compute_meshes=True):
+    @torch.compile
+    def prune(self):
+        all_sdfs = self.sdf_batch(self.points.transpose(1, 2)[:, :, self.M_points_iou:].contiguous())
+        mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
+        all_sdfs[~mask] = float('inf')
+        idx_points = torch.argmin(all_sdfs, dim=1) 
+        counts_points = torch.zeros(all_sdfs.shape[0], all_sdfs.shape[1], device=all_sdfs.device)
+        for b in range(all_sdfs.shape[0]):
+            counts_points[b] = torch.bincount(idx_points[b], minlength=self.N_max).float()
+        return (counts_points <= 5) & self.exist_mask
+
+    def update_handler(self, denormalize=True, compute_meshes=True):
+        if self.enable_pruning:
+            self.exist_mask &= ~self.prune()
+            prune_mask = prune_mask.cpu()
         for i, idx in enumerate(self.indices):
+            if self.enable_pruning: self.pred_handler.exist[idx][prune_mask[i]] = 0.
             mask = self.exist_mask[i].cpu().numpy()
             if not np.any(mask): continue
             
-            self.pred_handler.scale[idx][mask] = self.scale()[i][mask].detach().cpu().numpy()
+            # Denormalize
+            s = self.scale()[i][mask].detach().cpu().numpy()
+            t = self.translation[i][mask].detach().cpu().numpy()
+            if denormalize:
+                norm_trans = self.normalization_translation[i].detach().cpu().numpy()
+                norm_scale = self.normalization_scale[i].detach().cpu().numpy()
+                s = s * norm_scale
+                t = (t * norm_scale) + norm_trans
+
+            self.pred_handler.scale[idx][mask] = s
+            self.pred_handler.translation[idx][mask] = t
             self.pred_handler.exponents[idx][mask] = self.exponents()[i][mask].detach().cpu().numpy()
-            self.pred_handler.tapering[idx][mask] = self.tapering()[i][mask].detach().cpu().numpy()
             self.pred_handler.rotation[idx][mask] = self.rotation()[i][mask].detach().cpu().numpy()
-            self.pred_handler.translation[idx][mask] = self.translation[i][mask].detach().cpu().numpy()
+
+            if self.enable_tapering:
+                self.pred_handler.tapering[idx][mask] = self.tapering()[i][mask].detach().cpu().numpy()
+            if self.enable_bending:
+                kb, alpha = self.bending()
+                combined = torch.stack([kb[i], alpha[i]], dim=-1).flatten(start_dim=1)
+                self.pred_handler.bending[idx][mask] = combined[mask].detach().cpu().numpy()
             
         if compute_meshes:
-            return self.pred_handler, self.pred_handler.get_meshes(resolution=30)
+            meshes = [self.pred_handler.get_mesh(idx, resolution=30) for idx in self.indices]
+            return self.pred_handler, meshes
         else:
             return self.pred_handler
 

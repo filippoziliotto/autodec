@@ -6,7 +6,6 @@ from omegaconf import OmegaConf
 from superdec.superdec import SuperDec
 from superdec.utils.predictions_handler_extended import PredictionHandler
 from superdec.data.dataloader import denormalize_outdict, denormalize_points
-import open3d as o3d
 import viser
 import random
 from superdec.data.dataloader import normalize_points, denormalize_outdict
@@ -23,11 +22,11 @@ def visualize_handler(server, superq, sdf_values, plot = False):
     # Expect batched tensors from BatchSuperQMulti; use batch 0
     sdf_values = sdf_values.detach().cpu()
 
-    pred_handler, meshes = superq.update_handler()
+    pred_handler, meshes = superq.update_handler(denormalize=False)
     if plot:
         plot_pred_handler(pred_handler, superq.truncation)
 
-    mesh = meshes[superq.indices[0]]
+    mesh = meshes[0]
     server.scene.add_mesh_trimesh("superquadrics", mesh=mesh, visible=True)
 
     M_ps = superq.M_points_surf
@@ -52,6 +51,19 @@ def visualize_handler(server, superq, sdf_values, plot = False):
         visible=False,
     )
 
+    # Add ground-truth occupied IOU points (green)
+    gt_occ = superq.occupancies[0].detach().cpu().numpy().astype(bool)
+    if gt_occ.any():
+        iou_occ_points = points[:-M_ps][gt_occ]
+        green_colors = np.tile(np.array([0.0, 1.0, 0.0]), (iou_occ_points.shape[0], 1))
+        server.scene.add_point_cloud(
+            name="/iou_occupied_points",
+            points=iou_occ_points,
+            colors=green_colors,
+            point_size=0.005,
+            visible=True,
+        )
+
     gt_occ = superq.occupancies[0].detach().cpu().numpy().astype(bool)
     pred_occ = sdf_arr < 0
     mismatch_mask = gt_occ != pred_occ[:-M_ps]
@@ -74,13 +86,14 @@ def main():
     superq = BatchSuperQMulti(
         pred_handler=pred_handler,
         indices=[0],
-        ply_paths=[f"data/ShapeNet/04379243/{pred_handler.names[0]}/pointcloud.npz"],
+        # ply_paths=[f"data/ShapeNet/04379243/{pred_handler.names[0]}/pointcloud.npz"],
+        ply_paths=[f"data/ABO/processed-complete/{pred_handler.names[0]}/pointcloud.npz"],
     )
     param_groups = superq.get_param_groups()
     optimizer = torch.optim.Adam(param_groups)
 
-    pred_handler, meshes = superq.update_handler()
-    orig_mesh = meshes[superq.indices[0]]
+    pred_handler, meshes = superq.update_handler(denormalize=False)
+    orig_mesh = meshes[0]
     plot_pred_handler(pred_handler, superq.truncation, filename="superq_plot_orig.png")
 
     server = viser.ViserServer()
@@ -88,7 +101,7 @@ def main():
 
     exist_vector = pred_handler.exist[superq.indices[0]].copy()
     pred_handler.exist[superq.indices[0]] = np.ones((16, 1))
-    all_mesh = pred_handler.get_meshes(resolution=30)[superq.indices[0]]
+    all_mesh = pred_handler.get_mesh(superq.indices[0], resolution=30)
     pred_handler.exist[superq.indices[0]] = exist_vector
     server.scene.add_mesh_trimesh("all_superquadrics", mesh=all_mesh, visible=False)
     server.scene.add_mesh_trimesh("original_superquadrics", mesh=orig_mesh, visible=False)
@@ -106,9 +119,11 @@ def main():
         point_size=0.005,
         visible=False,
     )
+    
+    
 
     # torch.autograd.set_detect_anomaly(True)
-    num_epochs = 5_000
+    num_epochs = 1_000
     pbar = tqdm(range(num_epochs), desc="Fitting Superquadrics")
     best_loss = float('inf')
     best_params = None
@@ -138,6 +153,7 @@ def main():
                     "raw_exponents": superq.raw_exponents.clone(),
                     "raw_rotation": superq.raw_rotation.clone(),
                     "raw_tapering": superq.raw_tapering.clone(),
+                    "raw_bending": superq.raw_bending.clone(),
                     "translation": superq.translation.clone(),
                     "iou": losses['iou'][0].item(),
                     "epoch": epoch,
@@ -149,6 +165,8 @@ def main():
         pbar.set_postfix({
             "IoU": f"{losses['iou'][0].item():.2f}",
             "Sdf": f"{losses['sdf'][0].item():.4f}",
+            "Bbox": f"{losses['bbox'][0].item():.4f}",
+            "Over": f"{losses['overlap'][0].item():.4f}",
             "Loss": f"{loss.item():.4f}"
         })
 
@@ -159,8 +177,8 @@ def main():
                 superq.raw_exponents.copy_(best_params["raw_exponents"])
                 superq.raw_rotation.copy_(best_params["raw_rotation"])
                 superq.raw_tapering.copy_(best_params["raw_tapering"])
+                superq.raw_bending.copy_(best_params["raw_bending"])
                 superq.translation.copy_(best_params["translation"])
-
     forward_out = superq.forward()
     sdf_vals = forward_out.get('sdfs')
     visualize_handler(server, superq, sdf_vals, plot=True)

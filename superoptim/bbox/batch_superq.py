@@ -26,7 +26,8 @@ class BatchSuperQMulti(nn.Module):
         ply_paths: list[str] = None,
         truncation: float = 0.05,
         device: str = "cuda",
-        external_data: dict = None
+        external_data: dict = None,
+        cfg: Optional[object] = None
     ):
         super().__init__()
         self.indices = indices

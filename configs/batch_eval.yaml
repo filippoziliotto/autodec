@@ -1,9 +1,14 @@
 # Hydra config for batch evaluation used by superoptim/batch_evaluate.py
-type: none
+type: iou_bend
 prefix: shapenet/shapenet_test
 small: true
 num_epochs: 1000
 device: cuda
+
+optimization:
+  tapering: false
+  bending: false
+  reorient: false
 
 dataloader:
   dataset: shapenet
