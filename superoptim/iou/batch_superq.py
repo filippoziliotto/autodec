@@ -415,23 +415,23 @@ class BatchSuperQMulti(nn.Module):
 
     @torch.compile
     def prune(self):
-        all_sdfs = self.sdf_batch(self.points.transpose(1, 2)[:, :, self.M_points_iou:].contiguous())
-        mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
-        all_sdfs[~mask] = float('inf')
-        idx_points = torch.argmin(all_sdfs, dim=1) 
-        counts_points = torch.zeros(all_sdfs.shape[0], all_sdfs.shape[1], device=all_sdfs.device)
-        for b in range(all_sdfs.shape[0]):
-            counts_points[b] = torch.bincount(idx_points[b], minlength=self.N_max).float()
-        return (counts_points <= 5) & self.exist_mask
+        with torch.no_grad():
+            all_sdfs = self.sdf_batch(self.points.transpose(1, 2)[:, :, self.M_points_iou:].contiguous())
+            mask = self.exist_mask.unsqueeze(-1).expand_as(all_sdfs)
+            all_sdfs[~mask] = float('inf')
+            idx_points = torch.argmin(all_sdfs, dim=1) 
+            counts_points = torch.zeros(all_sdfs.shape[0], all_sdfs.shape[1], device=all_sdfs.device)
+            for b in range(all_sdfs.shape[0]):
+                counts_points[b] = torch.bincount(idx_points[b], minlength=self.N_max).float()
+            return (counts_points <= 5) & self.exist_mask
 
     def update_handler(self, denormalize=True, compute_meshes=True):
-        # if self.enable_pruning:
-        #     prune_mask = self.prune()
-        #     print(f"Pruning {prune_mask.sum()} superquadrics")
-        #     self.exist_mask &= ~prune_mask
-        #     prune_mask = prune_mask.cpu()
+        if self.enable_pruning:
+            prune_mask = self.prune()
+            self.exist_mask &= ~prune_mask
+            prune_mask = prune_mask.cpu()
         for i, idx in enumerate(self.indices):
-            # if self.enable_pruning: self.pred_handler.exist[idx][prune_mask[i]] = 0.
+            if self.enable_pruning: self.pred_handler.exist[idx][prune_mask[i]] = 0.
             mask = self.exist_mask[i].cpu().numpy()
             if not np.any(mask): continue
             
