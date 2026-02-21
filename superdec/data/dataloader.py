@@ -272,6 +272,12 @@ class ObjectDataset(Dataset):
             gt_trans = (gt_trans - translation_np) / res['scale']
             gt_scale = gt_scale / res['scale']
 
+            aug_matrix = res['aug_matrix'].numpy()
+            R_aug = aug_matrix[:3, :3]
+            t_aug = aug_matrix[:3, 3]
+            gt_trans = gt_trans @ R_aug.T + t_aug
+            gt_rotate = R_aug @ gt_rotate
+
             rot_mat = torch.from_numpy(gt_rotate).unsqueeze(0).float()
             res.update({
                 'gt_scale': torch.from_numpy(gt_scale).float(),
