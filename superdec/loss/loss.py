@@ -343,6 +343,168 @@ class ParamLoss(nn.Module):
         loss_dict['all'] = loss.item()
         return loss, loss_dict
 
+class ParamLossPoles(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.w_exist = getattr(cfg, 'w_exist', 1.0)
+        self.w_shape = getattr(cfg, 'w_shape', 1.0)
+        self.w_poles = getattr(cfg, 'w_poles', 1.0)
+        self.w_tapering = getattr(cfg, 'w_tapering', 1.0)
+        self.w_bending = getattr(cfg, 'w_bending', 1.0)
+        self.w_sps = getattr(cfg, 'w_sps', 0.0)
+    
+    def poles(self, s, R, t):
+        B, N, _ = s.shape
+        
+        sx = s[..., 0]
+        sy = s[..., 1]
+        sz = s[..., 2]
+
+        local = torch.zeros(B, N, 6, 3, device=s.device)
+        local[:,:,0,0] =  sx  # +x
+        local[:,:,1,0] = -sx  # -x
+        local[:,:,2,1] =  sy  # +y
+        local[:,:,3,1] = -sy  # -y
+        local[:,:,4,2] =  sz  # +z
+        local[:,:,5,2] = -sz  # -z
+
+        # rotate
+        poles_world = torch.matmul(
+            R.unsqueeze(2),     # (B,N,1,3,3)
+            local.unsqueeze(-1) # (B,N,6,3,1)
+        ).squeeze(-1)
+
+        # translate
+        poles_world = poles_world + t.unsqueeze(2)
+        return poles_world
+    
+    def poles_mse(self, pred, gt, mask=None):
+        if mask is None:
+            pred_flat = pred.view(pred.shape[0], pred.shape[1], -1)
+            gt_flat = gt.view(gt.shape[0], gt.shape[1], -1)
+            return torch.cdist(pred_flat, gt_flat, p=2) / 6.0
+        
+        dist = torch.norm(pred - gt, dim=-1)  # (B, P, 6)
+        loss = dist.mean(dim=-1)  # (B, P)
+        return (loss * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
+
+    def shape_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 2.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+
+    def tapering_mse(self, pred, gt, mask=None):
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 2.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+
+    def bending_mse(self, pred_k, pred_a, gt, mask=None):
+        B, P = pred_k.shape[:2]
+        pred = torch.stack([pred_k, pred_a], dim=-1).reshape(B, P, 6)
+        if mask is None:
+            return torch.cdist(pred, gt, p=2)**2 / 6.0
+        loss = nn.MSELoss(reduction='none')(pred, gt)
+        return (loss * mask).sum() / (mask.sum() * 6 + 1e-6)
+    
+    def get_sparsity_loss(self, assign_matrix):
+        num_points = assign_matrix.shape[1]
+        norm_05 = (assign_matrix.sum(1)/num_points + 0.01).sqrt().mean(1).pow(2)
+        norm_05 = torch.mean(norm_05)
+        return norm_05
+    
+    def forward(self, batch, out_dict):
+        gt_scale = batch['gt_scale'].cuda().float()
+        gt_shape = batch['gt_shape'].cuda().float()
+        gt_trans = batch['gt_trans'].cuda().float()
+        gt_rotate = batch['gt_rotate'].cuda().float()
+        gt_exist = batch['gt_exist'].cuda().float()
+        if 'tapering' in out_dict:
+            gt_tapering = batch['gt_tapering'].cuda().float()
+        if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            gt_bending = batch['gt_bending'].cuda().float()
+
+        B, P = gt_scale.shape[:2]        
+        pred_poles = self.poles(out_dict['scale'], out_dict['rotate'], out_dict['trans'])
+        gt_poles = self.poles(gt_scale, gt_rotate, gt_trans)
+
+        with torch.no_grad():
+            # Compute cost matrix
+            # cost_poles = self.w_poles * self.poles_mse(pred_poles, gt_poles)
+            # cost_shape = self.w_shape * self.shape_mse(out_dict['shape'], gt_shape)
+            # cost_param = cost_poles + cost_shape
+            
+            # if 'tapering' in out_dict:
+            #     cost_tapering = self.w_tapering * self.tapering_mse(out_dict['tapering'], gt_tapering)
+            #     cost_param += cost_tapering
+                
+            # if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            #     cost_bending = self.w_bending * self.bending_mse(out_dict['bending_k'], out_dict['bending_a'], gt_bending)
+            #     cost_param += cost_bending
+                
+            # cost_exist = self.w_exist * torch.abs(out_dict['exist'].view(B, P, 1) - gt_exist.view(B, 1, P))
+            # C = cost_exist + cost_param #* gt_exist.view(B, 1, P)
+            C = self.poles_mse(pred_poles, gt_poles)
+            C_np = C.cpu().numpy()
+            
+            indices = []
+            for b in range(B):
+                row_ind, col_ind = linear_sum_assignment(C_np[b])
+                indices.append(col_ind)
+                
+            indices = torch.tensor(np.array(indices), device=gt_scale.device)
+            batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
+            gt_scale = gt_scale[batch_idx, indices]
+            gt_shape = gt_shape[batch_idx, indices]
+            gt_trans = gt_trans[batch_idx, indices]
+            gt_rotate = gt_rotate[batch_idx, indices]
+            gt_exist = gt_exist[batch_idx, indices]
+            gt_poles = gt_poles[batch_idx, indices]
+            if 'tapering' in out_dict:
+                gt_tapering = gt_tapering[batch_idx, indices]
+            if 'bending_k' in out_dict and 'bending_a' in out_dict:
+                gt_bending = gt_bending[batch_idx, indices]
+        
+        loss = 0
+        loss_dict = {}            
+        mask = (gt_exist > 0.5).float()
+
+        # Existance (binary cross-entropy)
+        exist_loss = self.w_exist * nn.BCELoss()(out_dict['exist'], gt_exist)
+        loss += exist_loss
+        loss_dict['param_exist'] = exist_loss.item()
+        
+        # Poles
+        poles_loss = self.w_poles * self.poles_mse(pred_poles, gt_poles, mask)
+        loss += poles_loss
+        loss_dict['param_poles'] = poles_loss.item()
+        
+        # Shape
+        shape_loss = self.w_shape * self.shape_mse(out_dict['shape'], gt_shape, mask)
+        loss += shape_loss
+        loss_dict['param_shape'] = shape_loss.item()
+        
+        # Tapering
+        if 'tapering' in out_dict:
+            tapering_loss = self.w_tapering * self.tapering_mse(out_dict['tapering'], gt_tapering, mask)
+            loss += tapering_loss
+            loss_dict['param_tapering'] = tapering_loss.item()
+
+        # Bending
+        if 'bending_k' in out_dict and 'bending_a' in out_dict:
+            bend_loss = self.w_bending * self.bending_mse(out_dict['bending_k'], out_dict['bending_a'], gt_bending, mask)
+            loss += bend_loss
+            loss_dict['param_bending'] = bend_loss.item()
+        
+        # stop trainer from complaining about unused parameters (TODO should we use it?)
+        sparsity_loss = self.w_sps * self.get_sparsity_loss(out_dict['assign_matrix'])
+        loss += sparsity_loss
+        loss_dict['sparsity_loss'] = sparsity_loss.item()
+        
+        loss_dict['all'] = loss.item()
+        return loss, loss_dict
+
 class IoULoss(BaseLoss):
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -554,6 +716,8 @@ class Loss(nn.Module):
             self.impl = SuperDecLoss(cfg)
         elif loss_type == 'param':
             self.impl = ParamLoss(cfg)
+        elif loss_type == 'param_poles':
+            self.impl = ParamLossPoles(cfg)
         elif loss_type == 'iou':
             self.impl = IoULoss(cfg)
         else:
