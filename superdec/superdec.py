@@ -44,14 +44,26 @@ class SuperDec(nn.Module):
         missing newly added head parameters (like tapering/bending) while still
         optionally enforcing strict loading for other keys.
         """
+        allowed_prefixes = ["heads.tapering_head", "heads.bending_k_head", "heads.bending_a_head"]
+        
+        # Handle rot_head shape mismatch (4 -> 6)
+        if self.heads.rotation6d and 'heads.rot_head.weight' in state_dict and state_dict['heads.rot_head.weight'].shape[0] == 4:
+            del state_dict['heads.rot_head.weight']
+            del state_dict['heads.rot_head.bias']
+            allowed_prefixes.append("heads.rot_head")
+            
+            warnings.warn(
+                "Loaded a checkpoint with 4D rotation head into a model with 6D rotation head. "
+                "The rotation head weights have been deleted from the state dict. "
+                "You will need to fine-tune the model to learn the 6D rotation representation."
+            )
+
         res = super(SuperDec, self).load_state_dict(state_dict, strict=False)
         missing = list(res.missing_keys)
         unexpected = list(res.unexpected_keys)
 
         # Allow missing keys that belong to newly added heads
-        allowed_prefixes = ["heads.tapering_head", "heads.bending_k_head", "heads.bending_a_head"]
         filtered_missing = [k for k in missing if not any(k.startswith(p) for p in allowed_prefixes)]
-
         if strict:
             if filtered_missing or unexpected:
                 msg = ''

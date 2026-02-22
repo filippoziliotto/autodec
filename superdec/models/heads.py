@@ -10,7 +10,8 @@ class SuperDecHead(nn.Module):
         self.emb_dims = emb_dims
         self.scale_head = nn.Linear(emb_dims, 3)
         self.shape_head = nn.Linear(emb_dims, 2)
-        self.rot_head = nn.Linear(emb_dims, 4)
+        self.rotation6d = getattr(ctx, 'rotation6d', False)
+        self.rot_head = nn.Linear(emb_dims, 6 if self.rotation6d else 4)
         self.t_head = nn.Linear(emb_dims, 3)
         self.exist_head = nn.Linear(emb_dims, 1)
         
@@ -28,8 +29,11 @@ class SuperDecHead(nn.Module):
         shape_before_activation = self.shape_head(x)
         shape = self.shape_activation(shape_before_activation)
 
-        q = F.normalize(self.rot_head(x), dim=-1, p=2)
-        rotation = self.quat2mat(q)
+        if self.rotation6d:
+            rotation = self.rot6d2mat(self.rot_head(x))
+        else:
+            q = F.normalize(self.rot_head(x), dim=-1, p=2)
+            rotation = self.quat2mat(q)            
 
         translation = self.t_head(x)
 
@@ -58,7 +62,25 @@ class SuperDecHead(nn.Module):
                             2*wz + 2*xy, w2 - x2 + y2 - z2, 2*yz - 2*wx,
                             2*xz - 2*wy, 2*wx + 2*yz, w2 - x2 - y2 + z2], dim=1).view(B, N, 3, 3)
         rotMat = rotMat.view(B,N,3,3)
-        return rotMat 
+        return rotMat
+    
+    @staticmethod
+    def rot6d2mat(rot6d):
+        """Convert 6D rotation representation to 3x3 rotation matrix.
+        Based on Zhou et al., "On the Continuity of Rotation Representations in Neural Networks", CVPR 2018
+        """
+        B, N, _ = rot6d.shape
+        rot6d = rot6d.view(-1, 6)
+        
+        a1 = rot6d[:, :3]
+        a2 = rot6d[:, 3:]
+        
+        b1 = F.normalize(a1, dim=-1)
+        b2 = F.normalize(a2 - torch.sum(b1 * a2, dim=-1, keepdim=True) * b1, dim=-1)
+        b3 = torch.cross(b1, b2, dim=-1)
+        
+        rotMat = torch.stack((b1, b2, b3), dim=-1)
+        return rotMat.view(B, N, 3, 3)
     
     @staticmethod 
     def scale_activation(x):
