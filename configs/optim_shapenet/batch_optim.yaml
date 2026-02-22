@@ -5,9 +5,9 @@ num_epochs: 1000
 device: cuda
 
 optimization:
-  tapering: false
-  bending: false
-  reorient: false
+  tapering: true
+  bending: true
+  reorient: true
   pruning: false
 
 dataloader:
@@ -16,7 +16,7 @@ dataloader:
   num_workers: 4
 
 shapenet:
-  split: test
+  split: train
   path: data/ShapeNet
   categories: null
   load_occupancy: true

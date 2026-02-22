@@ -20,7 +20,8 @@ def main(cfg: DictConfig):
     print("Config:\n" + OmegaConf.to_yaml(cfg))
     
     module_type = cfg.get('type', 'iou')
-    prefix = cfg.get('prefix', 'shapenet/shapenet_test')
+    dataset = cfg.dataloader.get('dataset', 'shapenet')
+    split = cfg.get(dataset).get('split', 'test')
     small = cfg.get('small', False)
 
     try:
@@ -32,10 +33,30 @@ def main(cfg: DictConfig):
         print(f"Error importing BatchSuperQMulti for type '{module_type}': {e}")
         return
 
-    print(f"Evaluating {module_type} on {prefix}...")
-    input_npz = f"data/output_npz/{prefix}.npz"
-    output_npz = f"data/output_npz/{prefix}_optimized_{module_type}.npz"
+    print(f"Evaluating {module_type} on {dataset} {split}...")
+    input_npz = f"data/output_npz/{dataset}/{dataset}_{split}.npz"
+    # Determine extras suffix (used for folder naming)
+    extras = ""
+    if module_type == "iou":
+        if getattr(cfg.optimization, "tapering", True): extras += "t"
+        if getattr(cfg.optimization, "bending", True): extras += "b"
+        if getattr(cfg.optimization, "reorient", True): extras += "r"
+        if getattr(cfg.optimization, "pruning", False): extras += "p"
+    folder_name = module_type + (f"_{extras}" if extras else "")
+    output_dir = os.path.join("data", "output_npz", dataset, folder_name)
+    if small:
+        output_dir = output_dir.replace("output_npz", "output_npz/small")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save config to the output directory
+    # cfg_path = os.path.join(output_dir, f"{split}_config.yaml")
+    # with open(cfg_path, "w") as f:
+    #     f.write(OmegaConf.to_yaml(cfg))
+
+    output_npz = os.path.join(output_dir, f"{split}.npz")
+
     print(f"Loading {input_npz}...")
+    print(f"Will save results to {output_npz}...")
     pred_handler = PredictionHandler.from_npz(input_npz)
     
     # Build dataloader from config (expects cfg.dataloader.*)
@@ -194,7 +215,7 @@ def main(cfg: DictConfig):
             aggregated_metrics['count'] += 1
             
             object_metrics.append({
-                'index': idx,
+                'index': idx.item(),
                 'name': pred_handler.names[idx],
                 'chamfer-L1': out_dict_cur['chamfer-L1'],
                 'chamfer-L2': out_dict_cur['chamfer-L2'],
@@ -209,7 +230,6 @@ def main(cfg: DictConfig):
     if module_type != "none" or small:
         print(f"Saving optimized results to {output_npz}...")
         if small:
-            output_npz = output_npz.replace("output_npz", "output_npz/small")
             predictions = {
                 'names': np.array(pred_handler.names)[valid_indices],
                 'pc': np.array(pred_handler.pc)[valid_indices],
