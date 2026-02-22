@@ -1,0 +1,102 @@
+seed: 42
+use_wandb: true
+wandb:
+  project: superdec
+  entity: gtave
+run_name: shapenet_params
+dataset: shapenet
+device: cuda
+
+checkpoints:
+  resume_from: checkpoints/shapenet/ckpt.pt
+  keep_epoch: False
+
+superdec:
+  extended: true
+  decoder:
+    n_queries: 16
+    n_layers: 3 # number of transformer decoders
+    n_heads: 1
+    masked_attention: false
+    swapped_attention: false
+    dim_feedforward: 512 # default
+    deep_supervision: False
+    pos_encoding_type: sinusoidal
+  point_encoder:
+    in_channels: 3
+    out_channels: 128
+    kernel_size: 3
+    resolution: 32
+    voxelization:
+      normalize: True
+      eps: 0
+    l1:
+      in_channels: 3
+      out_channels: 64
+      kernel_size: 3
+      resolution: 32
+      voxelization:
+        normalize: True
+        eps: 0
+    l2:
+      in_channels: 64
+      out_channels: 128
+      kernel_size: 3
+      resolution: 16
+      voxelization:
+        normalize: True
+        eps: 0
+    l3:
+      in_channels: 128
+      out_channels: 128
+      kernel_size: 3
+      resolution: 16
+      voxelization:
+        normalize: True
+        eps: 0  
+
+shapenet:
+  path: data/ShapeNet
+  categories: null #['03001627'] 
+  normalize: False
+  gt_train_path: data/output_npz/shapenet/iou_tbr/train.npz
+  gt_val_path: data/output_npz/shapenet/iou_tbr/val.npz
+  filter:
+    metric: f-score
+    threshold: 0.35
+
+trainer:
+  save_path: checkpoints
+  save_every_n_epochs: 100
+  num_epochs: 1000
+  batch_size: 32
+  num_workers: 4
+  evaluate_every_n_epochs: 5
+  augmentations: True
+  occlusions: False 
+optimizer:
+  lr: 4e-4 #1e-4 #1e-4   0.001
+  weight_decay: 0 # default
+  betas: [0.9, 0.999] # default
+  enable_scheduler: True # True
+  only_heads: False
+
+scheduler:  
+  _target_: torch.optim.lr_scheduler.OneCycleLR 
+  max_lr: ${optimizer.lr} 
+  epochs: ${trainer.num_epochs}
+  steps_per_epoch: -1
+
+loss:
+  type: param
+  w_exist: 1.0
+  w_scale: 20.0
+  w_shape: 2.0
+  w_trans: 80.0
+  w_rot: 0.2
+  w_tapering: 1.0
+  w_bending: 0.05
+  w_sps: 0.01
+  
+visualization:
+  res_primitives: 40

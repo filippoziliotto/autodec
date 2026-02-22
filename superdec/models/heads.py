@@ -35,7 +35,7 @@ class SuperDecHead(nn.Module):
 
         exist = self.exist_activation(self.exist_head(x))
 
-        out_dict = {"scale": scale, "shape": shape, "rotate": rotation, "rotate_q": q, "trans": translation, "exist": exist}
+        out_dict = {"scale": scale, "shape": shape, "rotate": rotation, "trans": translation, "exist": exist}
         if self.extended:
             tapering = self.tapering_activation(self.tapering_head(x))
             bending_k = self.bending_k_activation(self.bending_k_head(x), scale)

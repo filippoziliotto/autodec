@@ -8,7 +8,7 @@ try:
     import wandb
 except ImportError:
     wandb = None
-
+from wandb_viser import WandbViser
 
 class Trainer:
     def __init__(self, model, optimizer, scheduler, dataloaders, loss_fn, ctx, wandb_run=None, start_epoch=0, best_val_loss=float('inf'), is_distributed=False, train_sampler=None):
@@ -21,6 +21,7 @@ class Trainer:
         self.num_epochs = ctx.num_epochs
         self.save_path = ctx.save_path
         self.wandb_run = wandb_run
+        self.wandb_viser = WandbViser(self.wandb_run)
         self.start_epoch = start_epoch
         self.is_distributed = is_distributed
         self.train_sampler = train_sampler
@@ -68,6 +69,9 @@ class Trainer:
             outdict = self.model(batch['points'].cuda().float())
             loss, loss_dict = self.loss_fn(batch, outdict)
 
+            if total_batches % 10 == 0 and self.wandb_run is not None and wandb is not None:
+                self.wandb_viser.accumulate_wandb_objects(epoch, outdict, batch, num_samples=1)
+
             total_loss += loss.item()
             total_batches += 1
             
@@ -76,6 +80,10 @@ class Trainer:
                 avg_loss_dict[k] = avg_loss_dict.get(k, 0.0) + v
 
             pbar.set_postfix({k: f"{v / total_batches:.4f}" for k, v in avg_loss_dict.items()})
+
+        # Log accumulated objects
+        if self.wandb_run is not None and wandb is not None:
+            self.wandb_viser.log_accumulated_wandb_objects(epoch)
 
         # Compute averages
         for k in avg_loss_dict:

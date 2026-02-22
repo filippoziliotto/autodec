@@ -1,6 +1,6 @@
 .venv*
 outputs*
-wandb*
+wandb/*
 *.egg-info*
 *__pycache__*
 outdict*

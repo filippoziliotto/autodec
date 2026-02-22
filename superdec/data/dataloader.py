@@ -1,6 +1,7 @@
 import os
 from glob import glob
 
+import pandas as pd
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -204,10 +205,15 @@ class ObjectDataset(Dataset):
         self.normalize = getattr(cfg, 'normalize', False)
         self.use_fps = getattr(cfg, 'use_fps', False)
         self.load_occupancy = getattr(cfg, 'load_occupancy', False)
+        
+        self.valid_models = None
         self.gt_params_path = getattr(cfg, f'gt_{split}_path', None)
         self.gt_data, self.gt_mapping = {}, {}
         if self.gt_params_path is not None:
             self._load_gt_params()
+            self.filter_cfg = getattr(cfg, 'filter', None)
+            if self.filter_cfg is not None:
+                self._load_filter()
     
     def _load_gt_params(self):
         if not os.path.exists(self.gt_params_path):
@@ -223,6 +229,40 @@ class ObjectDataset(Dataset):
         except Exception as e:
             print(f"Error loading GT params: {e}")
             self.gt_data = None
+
+    def _load_filter(self):
+        metrics_path = self.gt_params_path.replace('.npz', '_metrics.csv')
+        if not os.path.exists(metrics_path):
+            print(f"Warning: Metrics path {metrics_path} not found for filtering.")
+            return
+            
+        try:
+            metric = self.filter_cfg.get('metric')
+            threshold = float(self.filter_cfg.get('threshold'))
+            operator = self.filter_cfg.get('operator', '<=' if 'chamfer' in metric.lower() else '>=')
+            
+            df = pd.read_csv(metrics_path)
+            if metric not in df.columns:
+                print(f"Warning: Metric {metric} not found in {metrics_path}.")
+                return
+                
+            total = len(df)            
+            if operator == '<=':
+                valid_df = df[df[metric] <= threshold]
+            elif operator == '>=':
+                valid_df = df[df[metric] >= threshold]
+            elif operator == '<':
+                valid_df = df[df[metric] < threshold]
+            elif operator == '>':
+                valid_df = df[df[metric] > threshold]
+            else:
+                print(f"Warning: Unknown operator {operator}.")
+                return
+                
+            self.valid_models = set(valid_df['name'].astype(str))
+            print(f"Filtered {total - len(self.valid_models)} models. {len(self.valid_models)} remaining based on {metric} {operator} {threshold}.")
+        except Exception as e:
+            print(f"Error loading metrics for filtering: {e}")
 
     def _load_pointcloud(self, model_path):
         # Load pointcloud and normals, prefer precomputed 4096 file on test
@@ -389,6 +429,10 @@ class ShapeNet(ObjectDataset):
                 continue
             with open(split_file, 'r') as f:
                 model_ids = [line.strip() for line in f if line.strip()]
+            
+            if self.valid_models is not None:
+                model_ids = [m for m in model_ids if m in self.valid_models]
+                
             models.extend([{'category': c, 'model_id': m} for m in model_ids])
         return models
 
@@ -436,6 +480,9 @@ class ABO(ObjectDataset):
             models = models[n_val:]
         else:
             print(f"Unknown split {self.split} for ABO, using all data")
+            
+        if self.valid_models is not None:
+            models = [m for m in models if m in self.valid_models]
         
         return [{'model_id': m} for m in models]
 

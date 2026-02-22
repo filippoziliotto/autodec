@@ -2,7 +2,7 @@ from scipy.spatial import ConvexHull
 import random
 import numpy as np
 from .transform import PointCloudsTransform
-from superoptim.utils import timing
+# from superoptim.utils import timing
 
 def get_random_camera(points):
     bbox_min = points[:, :3].min(axis=0)

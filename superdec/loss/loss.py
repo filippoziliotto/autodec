@@ -193,6 +193,7 @@ class ParamLoss(nn.Module):
         self.w_rot = getattr(cfg, 'w_rot', 1.0)
         self.w_tapering = getattr(cfg, 'w_tapering', 1.0)
         self.w_bending = getattr(cfg, 'w_bending', 1.0)
+        self.w_sps = getattr(cfg, 'w_sps', 0.0)
         
     def scale_mse(self, pred, gt, mask=None):
         if mask is None:
@@ -237,6 +238,12 @@ class ParamLoss(nn.Module):
         loss = nn.MSELoss(reduction='none')(pred, gt)
         return (loss * mask).sum() / (mask.sum() * 6 + 1e-6)
     
+    def get_sparsity_loss(self, assign_matrix):
+        num_points = assign_matrix.shape[1]
+        norm_05 = (assign_matrix.sum(1)/num_points + 0.01).sqrt().mean(1).pow(2)
+        norm_05 = torch.mean(norm_05)
+        return norm_05
+    
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
         gt_shape = batch['gt_shape'].cuda().float()
@@ -248,13 +255,14 @@ class ParamLoss(nn.Module):
         if 'bending_k' in out_dict and 'bending_a' in out_dict:
             gt_bending = batch['gt_bending'].cuda().float()
 
+        rotation = mat2quat(out_dict['rotate'])
         B, P = gt_scale.shape[:2]
         with torch.no_grad():
             # Compute cost matrix
             cost_scale = self.w_scale * self.scale_mse(out_dict['scale'], gt_scale)
             cost_shape = self.w_shape * self.shape_mse(out_dict['shape'], gt_shape)
             cost_trans = self.w_trans * self.trans_mse(out_dict['trans'], gt_trans)
-            cost_rot = self.w_rot * self.rot_mse(out_dict['rotate_q'], gt_rotate)
+            cost_rot = self.w_rot * self.rot_mse(rotation, gt_rotate)
             cost_param = cost_scale + cost_shape + cost_trans + cost_rot
             
             if 'tapering' in out_dict:
@@ -311,7 +319,7 @@ class ParamLoss(nn.Module):
         loss_dict['param_trans'] = trans_loss.item()
         
         # Rotation
-        rot_loss = self.w_rot * self.rot_mse(out_dict['rotate_q'], gt_rotate, mask)
+        rot_loss = self.w_rot * self.rot_mse(rotation, gt_rotate, mask)
         loss += rot_loss
         loss_dict['param_rot'] = rot_loss.item()
 
@@ -326,6 +334,11 @@ class ParamLoss(nn.Module):
             bend_loss = self.w_bending * self.bending_mse(out_dict['bending_k'], out_dict['bending_a'], gt_bending, mask)
             loss += bend_loss
             loss_dict['param_bending'] = bend_loss.item()
+        
+        # stop trainer from complaining about unused parameters (TODO should we use it?)
+        sparsity_loss = self.w_sps * self.get_sparsity_loss(out_dict['assign_matrix'])
+        loss += sparsity_loss
+        loss_dict['sparsity_loss'] = sparsity_loss.item()
         
         loss_dict['all'] = loss.item()
         return loss, loss_dict

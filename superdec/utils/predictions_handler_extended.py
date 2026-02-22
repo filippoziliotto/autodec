@@ -14,7 +14,14 @@ def extend_dict(outdict):
     if 'tapering' not in outdict:
         outdict['tapering'] = cls.zeros((B, N, 2))
     if 'bending' not in outdict or outdict['bending'].shape[-1] != 6: 
-        outdict['bending'] = cls.zeros((B, N, 6))
+        if 'bending_k' in outdict and 'bending_a' in outdict:
+            outdict['bending'] = cls.stack([
+                outdict['bending_k'][..., 0], outdict['bending_a'][..., 0],
+                outdict['bending_k'][..., 1], outdict['bending_a'][..., 1],
+                outdict['bending_k'][..., 2], outdict['bending_a'][..., 2]
+            ], -1)
+        else:
+            outdict['bending'] = cls.zeros((B, N, 6))
     return outdict
 
 class PointCloud:
