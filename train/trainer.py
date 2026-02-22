@@ -144,21 +144,25 @@ class Trainer:
     def train(self):
         """Main training loop."""
         save_every = getattr(self.ctx, 'save_every_n_epochs', 1)
+        evaluate_every = getattr(self.ctx, 'evaluate_every_n_epochs', 1)
+        val_loss = None
         
         for epoch in range(self.start_epoch, self.num_epochs):
             # Training phase
             self.train_one_epoch(epoch)
             
-            # Evaluation phase (every epoch in the main process)
+            # Evaluation phase
             if is_main_process():
-                val_metrics = self.evaluate(epoch)
-                val_loss = val_metrics.get('loss', None) or list(val_metrics.values())
-                val_loss = val_loss[0] if val_loss else 0.0
+                do_eval = ((epoch + 1) % evaluate_every == 0) or (epoch == self.num_epochs - 1)
+                if do_eval:
+                    val_metrics = self.evaluate(epoch)
+                    val_loss_val = val_metrics.get('loss', None) or list(val_metrics.values())
+                    val_loss = val_loss_val[0] if val_loss_val else 0.0
+
+                    # Log validation metrics to wandb
+                    if self.wandb_run is not None:
+                        self.wandb_run.log({f"val/{k}": v for k, v in val_metrics.items()}, step=epoch)
 
                 do_save = ((epoch + 1) % save_every == 0) or (epoch == self.num_epochs - 1)
                 if do_save: 
                     self.save_checkpoint(epoch, val_loss)
-
-                # Log validation metrics to wandb (every epoch)
-                if self.wandb_run is not None:
-                    self.wandb_run.log({f"val/{k}": v for k, v in val_metrics.items()}, step=epoch)

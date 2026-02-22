@@ -22,6 +22,7 @@ class WandbViser:
         self.wandb_run = wandb_run
         self.wandb_val_objects ={'pred': [], 'gt': []}
         self.wandb_val_temp_files = []
+        self.log_gt = True
          
     def _point_cloud_to_spheres(self, points, colors=None, default_color=(180, 180, 180, 255), radius=0.008, max_points=512):
         """Convert a point cloud to a mesh of small spheres for glb export."""
@@ -65,8 +66,9 @@ class WandbViser:
             log_dict = {}
             if self.wandb_val_objects['pred']:
                 log_dict["visual/pred"] = self.wandb_val_objects['pred']
-            if self.wandb_val_objects['gt'] and epoch == 0:
+            if self.wandb_val_objects['gt'] and self.log_gt:
                 log_dict["visual/gt"] = self.wandb_val_objects['gt']
+                self.log_gt = False
             if log_dict:
                 self.wandb_run.log(log_dict, step=epoch)
             self.wandb_val_objects = {'pred': [], 'gt': []}
@@ -86,7 +88,7 @@ class WandbViser:
         self.wandb_val_temp_files.extend(pred_temp_files)
         
         # Get ground truth if available
-        if 'gt_scale' in batch and epoch == 0:
+        if 'gt_scale' in batch and self.log_gt:
             B, N, _ = batch['points'].shape
             P = batch['gt_scale'].shape[1]
             gt_outdict = {

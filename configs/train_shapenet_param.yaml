@@ -96,7 +96,7 @@ loss:
   w_rot: 0.2
   w_tapering: 1.0
   w_bending: 0.05
-  w_sps: 0.01
+  w_sps: 0.0
   
 visualization:
   res_primitives: 40
