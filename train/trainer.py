@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from utils import is_main_process
+from superoptim.evaluation import compute_ious_sdf_from_outdict
 
 try:
     import wandb
@@ -68,6 +69,12 @@ class Trainer:
         for batch in pbar:
             outdict = self.model(batch['points'].cuda().float())
             loss, loss_dict = self.loss_fn(batch, outdict)
+
+            if 'points_iou' in batch and 'occupancies' in batch:
+                points_iou = batch['points_iou'].cuda().float()
+                occupancies = batch['occupancies'].cuda().bool()
+                ious = compute_ious_sdf_from_outdict(outdict, points_iou, occupancies, device='cuda')
+                loss_dict['iou'] = ious.mean().item()
 
             if total_batches % 10 == 0 and self.wandb_run is not None and wandb is not None:
                 self.wandb_viser.accumulate_wandb_objects(epoch, outdict, batch, num_samples=1)

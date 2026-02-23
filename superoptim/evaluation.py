@@ -178,12 +178,11 @@ def get_outdict(pc_gt, normals_gt, pc_pred, normals_pred):
         }
     return out_dict_cur
 
-def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
-    """Compute per-primitive SDFs for a batch of objects from a PredictionHandler.
+def sdfs_from_outdict(outdict, points, device='cuda'):
+    """Compute per-primitive SDFs for a batch of objects from an outdict.
 
     Args:
-        pred_handler: PredictionHandler with primitive parameters stored as numpy arrays.
-        indices: list of object indices to evaluate (length B).
+        outdict: Dictionary containing primitive parameters as torch tensors.
         points: torch tensor or numpy array with shape (B, M, 3) of query points.
         device: torch device string.
 
@@ -195,16 +194,30 @@ def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
     else:
         points = points.to(device=device, dtype=torch.float32)
 
-    B = len(indices)
+    B = points.shape[0]
     M = points.shape[1]
-    N = pred_handler.scale.shape[1]
+    N = outdict['scale'].shape[1]
 
-    scales = torch.stack([torch.tensor(pred_handler.scale[i], dtype=torch.float32, device=device) for i in indices], dim=0)
-    exps = torch.stack([torch.tensor(pred_handler.exponents[i], dtype=torch.float32, device=device) for i in indices], dim=0)
-    R = torch.stack([torch.tensor(pred_handler.rotation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
-    t = torch.stack([torch.tensor(pred_handler.translation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
-    taper = torch.stack([torch.tensor(pred_handler.tapering[i], dtype=torch.float32, device=device) for i in indices], dim=0)
-    bending = torch.stack([torch.tensor(pred_handler.bending[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    scales = outdict['scale'].to(device)
+    exps = outdict['shape'].to(device)
+    R = outdict['rotate'].to(device)
+    t = outdict['trans'].to(device)
+    
+    if 'tapering' in outdict:
+        taper = outdict['tapering'].to(device)
+    else:
+        taper = torch.zeros((B, N, 2), dtype=torch.float32, device=device)
+        
+    if 'bending' in outdict and outdict['bending'].shape[-1] == 6:
+        bending = outdict['bending'].to(device)
+    elif 'bending_k' in outdict and 'bending_a' in outdict:
+        bending = torch.stack([
+            outdict['bending_k'][..., 0], outdict['bending_a'][..., 0],
+            outdict['bending_k'][..., 1], outdict['bending_a'][..., 1],
+            outdict['bending_k'][..., 2], outdict['bending_a'][..., 2]
+        ], -1).to(device)
+    else:
+        bending = torch.zeros((B, N, 6), dtype=torch.float32, device=device)
 
     # Prepare points: (B, M, 3) -> (B, 1, 3, M)
     points_expanded = points.permute(0, 2, 1).unsqueeze(1)
@@ -288,27 +301,45 @@ def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
     sdf = safe_mul(r0, (1 - f_func))
     return sdf
 
-def compute_ious_sdf(pred_handler, indices, points_iou, occupancies, device='cuda'):
-    """Compute IoU per object using SDF union from `pred_handler` parameters.
+def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
+    """Compute per-primitive SDFs for a batch of objects from a PredictionHandler.
 
     Args:
-        pred_handler: PredictionHandler
-        indices: list of indices (length B)
-        points_iou: torch tensor shape (B, M, 3) on the target device
-        occupancies: torch tensor shape (B, M) bool
-        device: device string
+        pred_handler: PredictionHandler with primitive parameters stored as numpy arrays.
+        indices: list of object indices to evaluate (length B).
+        points: torch tensor or numpy array with shape (B, M, 3) of query points.
+        device: torch device string.
 
     Returns:
-        numpy array of IoUs length B
+        sdfs: torch tensor of shape (B, N, M) with per-primitive SDF values.
     """
-    assert occupancies.dtype == torch.bool
-    
-    sdfs = sdfs_from_pred_handler(pred_handler, indices, points_iou, device=device)
-    # mask out non-existing primitives
-    exist_masks = torch.stack([torch.tensor(pred_handler.exist[i] > 0.5, dtype=torch.bool, device=device) for i in indices], dim=0)
-    mask = exist_masks.expand_as(sdfs)
-    sdfs[~mask] = float('inf')
+    if isinstance(points, np.ndarray):
+        points = torch.tensor(points, dtype=torch.float32, device=device)
+    else:
+        points = points.to(device=device, dtype=torch.float32)
 
+    B = len(indices)
+    M = points.shape[1]
+    N = pred_handler.scale.shape[1]
+
+    scales = torch.stack([torch.tensor(pred_handler.scale[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    exps = torch.stack([torch.tensor(pred_handler.exponents[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    R = torch.stack([torch.tensor(pred_handler.rotation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    t = torch.stack([torch.tensor(pred_handler.translation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    taper = torch.stack([torch.tensor(pred_handler.tapering[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+    bending = torch.stack([torch.tensor(pred_handler.bending[i], dtype=torch.float32, device=device) for i in indices], dim=0)
+
+    outdict = {
+        'scale': scales,
+        'shape': exps,
+        'rotate': R,
+        'trans': t,
+        'tapering': taper,
+        'bending': bending
+    }
+    return sdfs_from_outdict(outdict, points, device)
+
+def compute_ious_sdf(sdfs, occupancies):
     min_sdf, _ = torch.min(sdfs, dim=1)
     pred_occ = (min_sdf <= 0)
 
@@ -316,3 +347,25 @@ def compute_ious_sdf(pred_handler, indices, points_iou, occupancies, device='cud
     union = (pred_occ | occupancies).sum(dim=1).float()
     ious = (intersection / torch.clamp(union, min=1e-6)).cpu().numpy()
     return ious
+
+def compute_ious_sdf_from_outdict(outdict, points_iou, occupancies, device='cuda'):
+    """Compute IoU per object using SDF union from `outdict` parameters."""
+    assert occupancies.dtype == torch.bool
+    
+    sdfs = sdfs_from_outdict(outdict, points_iou, device=device)
+    # mask out non-existing primitives
+    exist_masks = outdict['exist'] > 0.5
+    mask = exist_masks.expand_as(sdfs)
+    sdfs[~mask] = float('inf')
+    return compute_ious_sdf(sdfs, occupancies)
+
+def compute_ious_sdf_from_handler(pred_handler, indices, points_iou, occupancies, device='cuda'):
+    """Compute IoU per object using SDF union from `pred_handler` parameters."""
+    assert occupancies.dtype == torch.bool
+    
+    sdfs = sdfs_from_pred_handler(pred_handler, indices, points_iou, device=device)
+    # mask out non-existing primitives
+    exist_masks = outdict['exist'] > 0.5
+    mask = exist_masks.expand_as(sdfs)
+    sdfs[~mask] = float('inf')
+    return compute_ious_sdf(sdfs, occupancies)

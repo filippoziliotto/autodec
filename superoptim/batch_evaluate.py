@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 from omegaconf import OmegaConf
 
 from superdec.data.dataloader import ShapeNet, ABO
-from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader, compute_ious_sdf
+from .evaluation import get_outdict, eval_mesh, build_dataloader, _build_dataloader, compute_ious_sdf_from_handler
 
 def main(cfg: DictConfig):
     print("\n========== SuperDec Evaluation ==========")
@@ -184,7 +184,7 @@ def main(cfg: DictConfig):
         
         # Compute IoU using SDF
         with torch.no_grad():
-            batch_ious = compute_ious_sdf(pred_handler, batch_indices, points_iou, occupancies, device=device)
+            batch_ious = compute_ious_sdf_from_handler(pred_handler, batch_indices, points_iou, occupancies, device=device)
 
         # Evaluate mesh
         for b_idx in range(len(batch_indices)):
