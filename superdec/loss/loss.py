@@ -472,21 +472,11 @@ class ParamLoss(nn.Module):
         loss_dict['all'] = loss.item()
         return loss, loss_dict
 
-class ParamLossPoles(nn.Module):
+class ParamLossPoles(ParamLoss):
     def __init__(self, cfg):
-        super().__init__()
-        self.w_exist = getattr(cfg, 'w_exist', 1.0)
-        self.w_shape = getattr(cfg, 'w_shape', 1.0)
+        super().__init__(cfg)
         self.w_poles = getattr(cfg, 'w_poles', 1.0)
-        self.w_tapering = getattr(cfg, 'w_tapering', 1.0)
-        self.w_bending = getattr(cfg, 'w_bending', 1.0)
-        self.w_sps = getattr(cfg, 'w_sps', 0.0)
-        
-        self.c_exist = getattr(cfg, 'c_exist', 0.0)
-        self.c_shape = getattr(cfg, 'c_shape', 0.0)
         self.c_poles = getattr(cfg, 'c_poles', 0.0)
-        self.c_tapering = getattr(cfg, 'c_tapering', 0.0)
-        self.c_bending = getattr(cfg, 'c_bending', 0.0)
     
     def poles(self, s, R, t):
         B, N, _ = s.shape
@@ -522,32 +512,6 @@ class ParamLossPoles(nn.Module):
         dist = torch.norm(pred - gt, dim=-1)  # (B, P, 6)
         loss = dist.mean(dim=-1)  # (B, P)
         return (loss * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
-
-    def shape_mse(self, pred, gt, mask=None):
-        if mask is None:
-            return torch.cdist(pred, gt, p=2)**2 / 2.0
-        loss = nn.MSELoss(reduction='none')(pred, gt)
-        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
-
-    def tapering_mse(self, pred, gt, mask=None):
-        if mask is None:
-            return torch.cdist(pred, gt, p=2)**2 / 2.0
-        loss = nn.MSELoss(reduction='none')(pred, gt)
-        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
-
-    def bending_mse(self, pred_k, pred_a, gt, mask=None):
-        B, P = pred_k.shape[:2]
-        pred = torch.stack([pred_k, pred_a], dim=-1).reshape(B, P, 6)
-        if mask is None:
-            return torch.cdist(pred, gt, p=2)**2 / 6.0
-        loss = nn.MSELoss(reduction='none')(pred, gt)
-        return (loss * mask).sum() / (mask.sum() * 6 + 1e-6)
-    
-    def get_sparsity_loss(self, assign_matrix):
-        num_points = assign_matrix.shape[1]
-        norm_05 = (assign_matrix.sum(1)/num_points + 0.01).sqrt().mean(1).pow(2)
-        norm_05 = torch.mean(norm_05)
-        return norm_05
     
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
@@ -732,6 +696,7 @@ class ParamLossGeometric(ParamLoss):
                 
             indices = torch.tensor(np.array(indices), device=gt_scale.device)
             batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
+            gt_pts = gt_pts[batch_idx, indices]
             gt_scale = gt_scale[batch_idx, indices]
             gt_shape = gt_shape[batch_idx, indices]
             gt_trans = gt_trans[batch_idx, indices]

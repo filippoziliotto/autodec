@@ -17,7 +17,7 @@ urls = {github = "https://github.com/elisabettafedele/superdec"}
 dynamic = ["version"]
 
 [tool.setuptools]
-packages = ["superdec"]
+packages = ["superdec", "superoptim"]
 
 [tool.setuptools.dynamic]
 version = {attr = "superdec.__version__"}
