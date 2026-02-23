@@ -299,6 +299,11 @@ def sdfs_from_outdict(outdict, points, device='cuda'):
     f_func = safe_pow(safe_pow(term1 + term2, e2 / e1) + term3, -e1 / 2)
 
     sdf = safe_mul(r0, (1 - f_func))
+    
+    # mask out non-existing primitives
+    exist_masks = outdict['exist'] > 0.5
+    mask = exist_masks.expand_as(sdf)
+    sdf[~mask] = float('inf')
     return sdf
 
 def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
@@ -322,6 +327,7 @@ def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
     M = points.shape[1]
     N = pred_handler.scale.shape[1]
 
+    exist = torch.stack([torch.tensor(pred_handler.exist[i], dtype=torch.float32, device=device) for i in indices], dim=0)
     scales = torch.stack([torch.tensor(pred_handler.scale[i], dtype=torch.float32, device=device) for i in indices], dim=0)
     exps = torch.stack([torch.tensor(pred_handler.exponents[i], dtype=torch.float32, device=device) for i in indices], dim=0)
     R = torch.stack([torch.tensor(pred_handler.rotation[i], dtype=torch.float32, device=device) for i in indices], dim=0)
@@ -330,6 +336,7 @@ def sdfs_from_pred_handler(pred_handler, indices, points, device='cuda'):
     bending = torch.stack([torch.tensor(pred_handler.bending[i], dtype=torch.float32, device=device) for i in indices], dim=0)
 
     outdict = {
+        'exist': exist,
         'scale': scales,
         'shape': exps,
         'rotate': R,
@@ -353,10 +360,6 @@ def compute_ious_sdf_from_outdict(outdict, points_iou, occupancies, device='cuda
     assert occupancies.dtype == torch.bool
     
     sdfs = sdfs_from_outdict(outdict, points_iou, device=device)
-    # mask out non-existing primitives
-    exist_masks = outdict['exist'] > 0.5
-    mask = exist_masks.expand_as(sdfs)
-    sdfs[~mask] = float('inf')
     return compute_ious_sdf(sdfs, occupancies)
 
 def compute_ious_sdf_from_handler(pred_handler, indices, points_iou, occupancies, device='cuda'):
@@ -364,8 +367,4 @@ def compute_ious_sdf_from_handler(pred_handler, indices, points_iou, occupancies
     assert occupancies.dtype == torch.bool
     
     sdfs = sdfs_from_pred_handler(pred_handler, indices, points_iou, device=device)
-    # mask out non-existing primitives
-    exist_masks = outdict['exist'] > 0.5
-    mask = exist_masks.expand_as(sdfs)
-    sdfs[~mask] = float('inf')
     return compute_ious_sdf(sdfs, occupancies)

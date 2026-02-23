@@ -10,6 +10,8 @@ from torch_geometric.nn import fps
 from superdec.utils.transforms import mat2quat
 from superdec.data.transform import RotateAroundAxis3d, Scale3d, RandomMove3d, Compose, rotate_around_axis
 from superdec.data.transform_occlusions import BackFaceCulling, RandomOcclusion, HRPOcclusion
+from superdec.loss.sampler import EqualDistanceSamplerSQ
+from superdec.loss.loss import parametric_to_points_extended
 
 SHAPENET_CATEGORIES = {
     "04379243": "table", "02958343": "car", "03001627": "chair", "02691156": "airplane",
@@ -211,6 +213,11 @@ class ObjectDataset(Dataset):
         self.gt_data, self.gt_mapping = {}, {}
         if self.gt_params_path is not None:
             self._load_gt_params()
+            
+            self.geometric = getattr(cfg, 'geometric', False)
+            if self.geometric:
+                self.gt_sampler = EqualDistanceSamplerSQ(n_samples=256, D_eta=0.05, D_omega=0.05)
+            
             self.filter_cfg = getattr(cfg, 'filter', None)
             if self.filter_cfg is not None:
                 self._load_filter()
@@ -360,6 +367,27 @@ class ObjectDataset(Dataset):
                 'gt_tapering': torch.from_numpy(gt_tapering).float(),
                 'gt_bending': torch.from_numpy(gt_bending).float(),
             })
+
+            # If geometric sampling requested, sample parametric coords and points on each GT superquadric
+            if self.gt_sampler is not None:
+                # sampler expects batch dims: (1, P, ...)
+                etas, omegas = self.gt_sampler.sample_on_batch(
+                    gt_scale[None, ...].astype(np.float32), 
+                    gt_shape[None, ...].astype(np.float32)
+                )
+                etas[etas == 0] += 1e-6
+                omegas[omegas == 0] += 1e-6
+                res['gt_sq_etas'] = torch.from_numpy(etas[0]).float()
+                res['gt_sq_omegas'] = torch.from_numpy(omegas[0]).float()
+                res['gt_sq_points'] = parametric_to_points_extended(
+                    res['gt_scale'].unsqueeze(0),
+                    res['gt_shape'].unsqueeze(0),
+                    res['gt_tapering'].unsqueeze(0),
+                    res['gt_bending'][:, [0, 2, 4]].unsqueeze(0),
+                    res['gt_bending'][:, [1, 3, 5]].unsqueeze(0),
+                    res['gt_sq_etas'].unsqueeze(0),
+                    res['gt_sq_omegas'].unsqueeze(0)
+                )[0]
     
     def _get_model_path(self, idx):
         raise NotImplementedError(

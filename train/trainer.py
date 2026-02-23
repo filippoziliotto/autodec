@@ -77,7 +77,7 @@ class Trainer:
                 loss_dict['iou'] = ious.mean().item()
 
             if total_batches % 10 == 0 and self.wandb_run is not None and wandb is not None:
-                self.wandb_viser.accumulate_wandb_objects(epoch, outdict, batch, num_samples=1)
+                self.wandb_viser.accumulate_wandb_objects(epoch, outdict, batch, num_samples=2)
 
             total_loss += loss.item()
             total_batches += 1
