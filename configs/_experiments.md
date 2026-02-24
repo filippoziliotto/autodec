@@ -43,6 +43,10 @@ As before but CD instead of 1-1 matching of geometric points
 no mse on rot (yes on the rest - otherwise degenerates)
 plus mse on tapering and bending ks sum
 
+## Exp 022 - BCE & Geometric loss
+back to 1-1 geometric loss but remove rotation loss
+and increase bending and scale weight 
+
 # Exp 003 - BCE & Geometric loss
 cost & loss uses only geometric and exist
   w_geometric: 1.0
@@ -61,6 +65,9 @@ cost & loss uses only geometric and exist
 
 ## Exp 013 - BCE & Geometric loss
 As before but CD instead of 1-1 matching of geometric points
+
+## Exp 023 - BCE & Geometric loss
+As before but sinkhorn instead of CD matching of geometric points
 
 
 # Exp 004 - BCE & Parameter & Geometric loss & Occlusions

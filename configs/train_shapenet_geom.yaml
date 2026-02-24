@@ -3,7 +3,7 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_params_013
+run_name: shapenet_params_023
 dataset: shapenet
 device: cuda
 
@@ -91,9 +91,9 @@ scheduler:
 
 loss:
   type: param_geom
-  geometric_cd: true
-  w_geometric: 1.0
-  c_geometric: 1.0 
+  geometric_sinkhorn: true
+  w_geometric: 10.0
+  c_geometric: 10.0 
   w_exist: 1.0
   c_exist: 1.0
 

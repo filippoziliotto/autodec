@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+from geomloss import SamplesLoss
 
 from superdec.loss.sampler import EqualDistanceSamplerSQ
 from superdec.utils.transforms import transform_to_primitive_frame, quat2mat, mat2quat
@@ -622,6 +623,11 @@ class ParamLossGeometric(ParamLoss):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.geometric_cd = getattr(cfg, 'geometric_cd', False) 
+        self.geometric_sinkhorn = getattr(cfg, 'geometric_sinkhorn', False) 
+        if self.geometric_sinkhorn:
+            self.sinkhorn = SamplesLoss(loss="sinkhorn", p=2, blur=.05)
+        self.free_axis = self.geometric_cd or self.geometric_sinkhorn
+        
         self.w_geometric = getattr(cfg, 'w_geometric', 1.0)
         self.c_geometric = getattr(cfg, 'c_geometric', 1.0)
     
@@ -642,6 +648,28 @@ class ParamLossGeometric(ParamLoss):
         chamfer_per_prim = mean_pred_to_gt + mean_gt_to_pred  # (B, P)
         return (chamfer_per_prim * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
     
+    
+    def geometric_error_sinkhorn(self, pred, gt, mask=None):
+        if mask is None:
+            B, P, _, _ = gt.shape
+            gt_ext = gt.unsqueeze(1).expand(B, P, P, -1, 3)
+            dists = torch.norm(pred.unsqueeze(4) - gt_ext.unsqueeze(3), dim=-1)
+            mean_pred_to_gt = dists.min(dim=4)[0].mean(dim=3)  # (B, P_pred, P_gt)
+            mean_gt_to_pred = dists.min(dim=3)[0].mean(dim=3)  # (B, P_pred, P_gt)
+            chamfer = mean_pred_to_gt + mean_gt_to_pred
+            return chamfer
+
+        # Masked mode: compute per-primitive sinkhorn and aggregate using mask
+        N = pred.shape[-2]
+        pred_flat = pred.reshape(-1, N, 3)
+        gt_flat = gt.reshape(-1, N, 3)
+        erase_grads = not torch.is_grad_enabled()
+        sinkhorn_loss = self.sinkhorn(pred_flat, gt_flat).view(pred.shape[0], pred.shape[1])
+        if erase_grads and torch.is_grad_enabled():
+            sinkhorn_loss = sinkhorn_loss.detach()
+            torch.set_grad_enabled(False)
+        return (sinkhorn_loss * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
+    
     def geometric_error_11(self, pred, gt, mask=None):
         if mask is None:
             B, P, _, _ = gt.shape
@@ -655,11 +683,13 @@ class ParamLossGeometric(ParamLoss):
     def geometric_error(self, pred, gt, mask=None):
         if self.geometric_cd:
             return self.geometric_error_cd(pred, gt, mask)
+        elif self.geometric_sinkhorn:
+            return self.geometric_error_sinkhorn(pred, gt, mask)
         else:
             return self.geometric_error_11(pred, gt, mask)
     
     def tapering_mse(self, pred, gt, mask=None):
-        if not self.geometric_cd:
+        if not self.free_axis:
             return super().tapering_mse(pred, gt, mask)
 
         # pred shape (B, P, 2)
@@ -672,7 +702,7 @@ class ParamLossGeometric(ParamLoss):
         return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
     
     def bending_mse(self, pred_k, pred_a, gt, mask=None):
-        if not self.geometric_cd:
+        if not self.free_axis:
             return super().bending_mse(pred_k, pred_a, gt, mask)
 
         _pred_k = pred_k.sum(-1).unsqueeze(-1)
@@ -709,11 +739,12 @@ class ParamLossGeometric(ParamLoss):
             if self.c_geometric > 0:
                 # For cost computation downsample etas and omegas
                 n_pts = gt_sq_etas.shape[-1]
-                gt_sq_etas_ds, gt_sq_omegas_ds = gt_sq_etas, gt_sq_omegas
+                gt_sq_etas_ds, gt_sq_omegas_ds, gt_pts_ds = gt_sq_etas, gt_sq_omegas, gt_pts
                 if n_pts > 64:
                     idx = torch.linspace(0, n_pts - 1, steps=64, dtype=torch.int, device=gt_sq_etas.device)
                     gt_sq_etas_ds = gt_sq_etas.index_select(-1, idx)
                     gt_sq_omegas_ds = gt_sq_omegas.index_select(-1, idx)
+                    gt_pts_ds = gt_pts.index_select(-2, idx)
                 gt_sq_etas_ext = gt_sq_etas_ds.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
                 gt_sq_omegas_ext = gt_sq_omegas_ds.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
                 pts = parametric_to_points_extended(
@@ -728,7 +759,7 @@ class ParamLossGeometric(ParamLoss):
                     gt_sq_omegas_ext
                 )
                 pts = pts.view(B, P, P, -1, 3) # [B, P, P, N, 3]
-                cost_geometric = self.c_geometric * self.geometric_error(pts, gt_pts)
+                cost_geometric = self.c_geometric * self.geometric_error(pts, gt_pts_ds)
                 C += cost_geometric
 
             if self.c_scale > 0:

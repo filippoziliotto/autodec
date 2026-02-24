@@ -3,7 +3,7 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_params_012
+run_name: shapenet_params_022
 dataset: shapenet
 device: cuda
 
@@ -14,6 +14,7 @@ checkpoints:
 superdec:
   extended: true
   rotation6d: true
+  head_type: heads_mlps
   decoder:
     n_queries: 16
     n_layers: 3 # number of transformer decoders
@@ -91,18 +92,17 @@ scheduler:
 
 loss:
   type: param_geom
-  geometric_cd: true
   w_geometric: 1.0
   c_geometric: 1.0 
   c_exist: 1.0
 
   w_exist: 1.0
-  w_scale: 8.0
+  w_scale: 12.0
   w_shape: 1.0
   w_trans: 8.0
   w_rot: 0.0
   w_tapering: 1.0
-  w_bending: 0.1
+  w_bending: 0.15
   w_sps: 0.0
 
   

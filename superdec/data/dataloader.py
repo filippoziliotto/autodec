@@ -24,6 +24,7 @@ def normalize_points(points):
     translation = points.mean(0)
     points = points - translation
     scale = 2 * np.max(np.abs(points))
+    scale = max(scale, 1e-4) # avoid divisions by 0
     points = points / scale
     return points, translation, scale
 
@@ -290,7 +291,8 @@ class ObjectDataset(Dataset):
         normals = pc_data['normals']
         if self.transform_occlusions:
             t_data = self.transform_occlusions(points=points, normals=normals)
-            if t_data['points'].shape[0] > 0:
+             # avoid degenerate occlusions (this is out of the total 100k points)
+            if t_data['points'].shape[0] > 2048:
                 points = t_data['points']
                 normals = t_data['normals']
 
