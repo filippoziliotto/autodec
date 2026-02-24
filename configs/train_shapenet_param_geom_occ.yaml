@@ -59,7 +59,7 @@ superdec:
 shapenet:
   path: data/ShapeNet
   categories: null #['03001627'] 
-  normalize: False
+  normalize: True # otherwise how would it generalize to occlusions
   gt_train_path: data/output_npz/shapenet/iou_tbr/train.npz
   gt_val_path: data/output_npz/shapenet/iou_tbr/val.npz
   geometric_samples: 64
@@ -75,7 +75,7 @@ trainer:
   num_workers: 4
   evaluate_every_n_epochs: 10
   augmentations: True
-  occlusions: False 
+  occlusions: True 
 optimizer:
   lr: 4e-4 #1e-4 #1e-4   0.001
   weight_decay: 0 # default
@@ -97,9 +97,9 @@ loss:
   c_exist: 1.0
 
   w_exist: 1.0
-  w_scale: 8.0
+  w_scale: 0.0
   w_shape: 1.0
-  w_trans: 8.0
+  w_trans: 1.0
   w_rot: 0.0
   w_tapering: 1.0
   w_bending: 0.1

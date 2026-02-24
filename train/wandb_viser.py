@@ -83,7 +83,7 @@ class WandbViser:
     def accumulate_wandb_objects(self, epoch, outdict, batch, num_samples=1):
         """Accumulate wandb objects from a batch into the self."""
         # Get predictions
-        pred_objs, pred_temp_files = self.get_wandb_objects(outdict, batch['points'], num_samples=num_samples, resolution=50)
+        pred_objs, pred_temp_files = self.get_wandb_objects(outdict, batch['points'], num_samples=num_samples, resolution=30)
         self.wandb_val_objects['pred'].extend(pred_objs)
         self.wandb_val_temp_files.extend(pred_temp_files)
         
@@ -104,7 +104,7 @@ class WandbViser:
             if 'gt_bending' in batch:
                 gt_outdict['bending'] = batch['gt_bending']
                 
-            gt_objs, gt_temp_files = self.get_wandb_objects(gt_outdict, batch['points'], num_samples=num_samples, resolution=50)
+            gt_objs, gt_temp_files = self.get_wandb_objects(gt_outdict, batch['points'], num_samples=num_samples, resolution=30)
             self.wandb_val_objects['gt'].extend(gt_objs)
             self.wandb_val_temp_files.extend(gt_temp_files)
 

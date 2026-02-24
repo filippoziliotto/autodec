@@ -215,9 +215,10 @@ class ObjectDataset(Dataset):
         if self.gt_params_path is not None:
             self._load_gt_params()
             
-            self.geometric = getattr(cfg, 'geometric', False)
+            self.geometric = hasattr(cfg, 'geometric_samples')
             if self.geometric:
-                self.gt_sampler = EqualDistanceSamplerSQ(n_samples=256, D_eta=0.05, D_omega=0.05)
+                n_samples = cfg.geometric_samples
+                self.gt_sampler = EqualDistanceSamplerSQ(n_samples=n_samples, D_eta=0.05, D_omega=0.05)
             
             self.filter_cfg = getattr(cfg, 'filter', None)
             if self.filter_cfg is not None:
@@ -289,8 +290,9 @@ class ObjectDataset(Dataset):
         normals = pc_data['normals']
         if self.transform_occlusions:
             t_data = self.transform_occlusions(points=points, normals=normals)
-            points = t_data['points']
-            normals = t_data['normals']
+            if t_data['points'].shape[0] > 0:
+                points = t_data['points']
+                normals = t_data['normals']
 
         n_points = points.shape[0]
         if self.split == 'test' or n_points >= 4096:
@@ -381,6 +383,8 @@ class ObjectDataset(Dataset):
                 res['gt_sq_etas'] = torch.from_numpy(etas[0]).float()
                 res['gt_sq_omegas'] = torch.from_numpy(omegas[0]).float()
                 res['gt_sq_points'] = parametric_to_points_extended(
+                    res['gt_trans'].unsqueeze(0),
+                    res['gt_rotate'].unsqueeze(0),
                     res['gt_scale'].unsqueeze(0),
                     res['gt_shape'].unsqueeze(0),
                     res['gt_tapering'].unsqueeze(0),

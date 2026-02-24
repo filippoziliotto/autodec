@@ -3,7 +3,7 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_params_001
+run_name: shapenet_params_021
 dataset: shapenet
 device: cuda
 
@@ -13,7 +13,8 @@ checkpoints:
 
 superdec:
   extended: true
-  rotation6d: false
+  rotation6d: true
+  head_type: heads_mlp
   decoder:
     n_queries: 16
     n_layers: 3 # number of transformer decoders
@@ -69,7 +70,7 @@ shapenet:
 trainer:
   save_path: checkpoints
   save_every_n_epochs: 100
-  num_epochs: 2000
+  num_epochs: 1000
   batch_size: 32
   num_workers: 4
   evaluate_every_n_epochs: 10

@@ -58,6 +58,8 @@ def sampling_from_parametric_space_to_equivalent_points(
     return torch.stack([x, y, z], -1), torch.stack([nx, ny, nz], -1)
 
 def parametric_to_points_extended(
+    translation,
+    rotation,
     scale,
     shape,
     tapering,
@@ -162,7 +164,12 @@ def parametric_to_points_extended(
         'z'
     )
 
-    return torch.stack([x, y, z], -1)
+    pts = torch.stack([x, y, z], -1)
+    pts_world = torch.matmul(
+        rotation.unsqueeze(2),    # (B, P, 1, 3, 3)
+        pts.unsqueeze(-1)        # (B, P, N, 3, 1)
+    ).squeeze(-1) + translation.unsqueeze(2)
+    return pts_world
 
 class BaseLoss(nn.Module):
     def __init__(self, cfg):
@@ -614,18 +621,63 @@ class ParamLossPoles(ParamLoss):
 class ParamLossGeometric(ParamLoss):
     def __init__(self, cfg):
         super().__init__(cfg)
+        self.geometric_cd = getattr(cfg, 'geometric_cd', False) 
         self.w_geometric = getattr(cfg, 'w_geometric', 1.0)
         self.c_geometric = getattr(cfg, 'c_geometric', 1.0)
     
-    def geometric_error(self, pred, gt, mask=None):
+    def geometric_error_cd(self, pred, gt, mask=None):
         if mask is None:
-            pred_flat = pred.view(pred.shape[0], pred.shape[1], -1)
-            gt_flat = gt.view(gt.shape[0], gt.shape[1], -1)
-            return torch.cdist(pred_flat, gt_flat, p=2) / 6.0
+            B, P, _, _ = gt.shape
+            gt_ext = gt.unsqueeze(1).expand(B, P, P, -1, 3)
+            dists = torch.norm(pred.unsqueeze(4) - gt_ext.unsqueeze(3), dim=-1)
+            mean_pred_to_gt = dists.min(dim=4)[0].mean(dim=3)  # (B, P_pred, P_gt)
+            mean_gt_to_pred = dists.min(dim=3)[0].mean(dim=3)  # (B, P_pred, P_gt)
+            chamfer = mean_pred_to_gt + mean_gt_to_pred
+            return chamfer
+
+        # Masked mode: compute per-primitive chamfer and aggregate using mask
+        dists = torch.norm(pred.unsqueeze(3) - gt.unsqueeze(2), dim=-1)  # (B, P, Np, Ng)
+        mean_pred_to_gt = dists.min(dim=3)[0].mean(dim=2)  # (B, P)
+        mean_gt_to_pred = dists.min(dim=2)[0].mean(dim=2)  # (B, P)
+        chamfer_per_prim = mean_pred_to_gt + mean_gt_to_pred  # (B, P)
+        return (chamfer_per_prim * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
+    
+    def geometric_error_11(self, pred, gt, mask=None):
+        if mask is None:
+            B, P, _, _ = gt.shape
+            gt_ext = gt.unsqueeze(1).expand(B, P, P, -1, 3)
+            return torch.norm(pred - gt_ext, dim=-1).mean(dim=-1) # (B, P, P)
         
-        dist = torch.norm(pred - gt, dim=-1)  # (B, P, 6)
+        dist = torch.norm(pred - gt, dim=-1)  # (B, P, N)
         loss = dist.mean(dim=-1)  # (B, P)
         return (loss * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
+    
+    def geometric_error(self, pred, gt, mask=None):
+        if self.geometric_cd:
+            return self.geometric_error_cd(pred, gt, mask)
+        else:
+            return self.geometric_error_11(pred, gt, mask)
+    
+    def tapering_mse(self, pred, gt, mask=None):
+        # pred shape (B, P, 2)
+        _pred = pred.sum(-1).unsqueeze(-1)
+        _gt = gt.sum(-1).unsqueeze(-1)
+        if mask is None:
+            return torch.cdist(_pred, _gt, p=2)**2 / 2.0
+
+        loss = nn.MSELoss(reduction='none')(_pred, _gt)
+        return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
+    
+    def bending_mse(self, pred_k, pred_a, gt, mask=None):
+        _pred_k = pred_k.sum(-1).unsqueeze(-1)
+        _gt_k = gt[..., 0::2].sum(-1).unsqueeze(-1)
+        
+        # pred_k shape (B, P, 3)
+        if mask is None:
+            return torch.cdist(_pred_k, _gt_k, p=2)**2 / 3.0
+
+        loss = nn.MSELoss(reduction='none')(_pred_k, _gt_k)
+        return (loss * mask).sum() / (mask.sum() * 3 + 1e-6)
     
     def forward(self, batch, out_dict):
         gt_scale = batch['gt_scale'].cuda().float()
@@ -638,24 +690,31 @@ class ParamLossGeometric(ParamLoss):
         if 'bending_k' in out_dict and 'bending_a' in out_dict:
             gt_bending = batch['gt_bending'].cuda().float()
         
+        B, P = gt_scale.shape[:2]
         gt_pts = batch['gt_sq_points'].cuda().float()
-        pts = parametric_to_points_extended(
-            out_dict['scale'], 
-            out_dict['shape'], 
-            out_dict['tapering'], 
-            out_dict['bending_k'], 
-            out_dict['bending_a'],
-            batch['gt_sq_etas'].cuda().float(),
-            batch['gt_sq_omegas'].cuda().float()
-        )
+        gt_sq_etas = batch['gt_sq_etas'].cuda().float() # [B, P, N]
+        gt_sq_omegas = batch['gt_sq_omegas'].cuda().float() # [B, P, N]
 
         rotation = mat2quat(out_dict['rotate'])
-        B, P = gt_scale.shape[:2]
         with torch.no_grad():
             device = gt_scale.device
             C = torch.zeros((B, P, P), device=device)
 
             if self.c_geometric > 0:
+                gt_sq_etas_ext = gt_sq_etas.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
+                gt_sq_omegas_ext = gt_sq_omegas.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
+                pts = parametric_to_points_extended(
+                    out_dict['trans'], 
+                    out_dict['rotate'], 
+                    out_dict['scale'], 
+                    out_dict['shape'], 
+                    out_dict['tapering'], 
+                    out_dict['bending_k'], 
+                    out_dict['bending_a'],
+                    gt_sq_etas_ext,
+                    gt_sq_omegas_ext
+                )
+                pts = pts.view(B, P, P, -1, 3) # [B, P, P, N, 3]
                 cost_geometric = self.c_geometric * self.geometric_error(pts, gt_pts)
                 C += cost_geometric
 
@@ -697,6 +756,8 @@ class ParamLossGeometric(ParamLoss):
             indices = torch.tensor(np.array(indices), device=gt_scale.device)
             batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
             gt_pts = gt_pts[batch_idx, indices]
+            gt_sq_etas = gt_sq_etas[batch_idx, indices]
+            gt_sq_omegas = gt_sq_omegas[batch_idx, indices]
             gt_scale = gt_scale[batch_idx, indices]
             gt_shape = gt_shape[batch_idx, indices]
             gt_trans = gt_trans[batch_idx, indices]
@@ -717,6 +778,17 @@ class ParamLossGeometric(ParamLoss):
         loss_dict['param_exist'] = exist_loss.item()
         
         # Geometric
+        pts = parametric_to_points_extended(
+            out_dict['trans'], 
+            out_dict['rotate'], 
+            out_dict['scale'],
+            out_dict['shape'],
+            out_dict['tapering'],
+            out_dict['bending_k'],
+            out_dict['bending_a'],
+            gt_sq_etas,
+            gt_sq_omegas
+        )
         geometric_loss = self.geometric_error(pts, gt_pts, mask)
         loss += self.w_geometric * geometric_loss
         loss_dict['param_geometric'] = geometric_loss.item()

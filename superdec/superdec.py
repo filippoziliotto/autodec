@@ -5,7 +5,9 @@ import warnings
 from superdec.models.decoder import TransformerDecoder
 from superdec.models.decoder_layer import DecoderLayer
 from superdec.models.point_encoder import StackedPVConv
-from superdec.models.heads import SuperDecHead
+from superdec.models.heads import SuperDecHead as SuperDecHead_base
+from superdec.models.heads_mlp import SuperDecHead as SuperDecHead_mlp
+from superdec.models.heads_mlps import SuperDecHead as SuperDecHead_mlps
 from superdec.lm_optimization.lm_optimizer import LMOptimizer
 
 class SuperDec(nn.Module):
@@ -35,7 +37,18 @@ class SuperDec(nn.Module):
             nn.ReLU(),
             nn.Linear(self.emb_dims, self.emb_dims),
         )
-        self.heads = SuperDecHead(emb_dims=self.emb_dims, ctx=ctx)
+        
+        head_type = getattr(ctx, 'head_type', 'heads')
+        print(f"Using SuperDecHead type {head_type}")
+        if head_type == 'heads':
+            self.heads = SuperDecHead_base(emb_dims=self.emb_dims, ctx=ctx)
+        elif head_type == 'heads_mlp':
+            self.heads = SuperDecHead_mlp(emb_dims=self.emb_dims, ctx=ctx)
+        elif head_type == 'heads_mlps':
+            self.heads = SuperDecHead_mlps(emb_dims=self.emb_dims, ctx=ctx)
+        else:
+            raise ValueError(f"Unknown head_type: {head_type}")
+            
         init_queries = torch.zeros(self.n_queries + 1, self.emb_dims)
         self.register_buffer('init_queries', init_queries) # TODO double check -> new codebase
 
