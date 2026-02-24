@@ -3,7 +3,7 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_params_012
+run_name: shapenet_params_004
 dataset: shapenet
 device: cuda
 
@@ -72,7 +72,7 @@ trainer:
   save_every_n_epochs: 100
   num_epochs: 2000
   batch_size: 32
-  num_workers: 4
+  num_workers: 8
   evaluate_every_n_epochs: 10
   augmentations: True
   occlusions: True 
@@ -91,15 +91,14 @@ scheduler:
 
 loss:
   type: param_geom
-  geometric_cd: true
   w_geometric: 1.0
   c_geometric: 1.0 
   c_exist: 1.0
 
   w_exist: 1.0
-  w_scale: 0.0
+  w_scale: 8.0
   w_shape: 1.0
-  w_trans: 1.0
+  w_trans: 8.0
   w_rot: 0.0
   w_tapering: 1.0
   w_bending: 0.1

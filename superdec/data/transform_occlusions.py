@@ -5,6 +5,10 @@ from .transform import PointCloudsTransform
 # from superoptim.utils import timing
 
 def get_random_camera(points):
+    # Handle empty points safely
+    if points is None or points.shape[0] == 0:
+        return np.array([0.0, 0.0, 0.0])
+
     bbox_min = points[:, :3].min(axis=0)
     bbox_max = points[:, :3].max(axis=0)
     bbox_center = (bbox_min + bbox_max) / 2
@@ -60,6 +64,11 @@ class BackFaceCulling(PointCloudsTransform):
     # @timing
     def get_params_dependent_on_targets(self, params):
         points = params["points"]
+        # Safe early return for empty point clouds
+        if points is None or points.shape[0] == 0:
+            camera_pos = np.array(self.camera_position) if self.camera_position is not None else np.array([0.0, 0.0, 0.0])
+            return {"mask": np.zeros(0, dtype=bool), "camera_position": camera_pos}
+
         normals = params.get("normals", None)
         if self.camera_position is None:
             camera_pos = get_random_camera(points)
@@ -148,7 +157,11 @@ class RandomOcclusion(PointCloudsTransform):
 
     def get_params_dependent_on_targets(self, params):
         points = params["points"]
-        
+        # Handle empty points safely
+        if points is None or points.shape[0] == 0:
+            camera_pos = np.array(self.camera_position) if self.camera_position is not None else np.array([0.0, 0.0, 0.0])
+            return {"mask": np.zeros(0, dtype=bool), "occluders": [], "camera_position": camera_pos}
+
         bbox_min = points[:, :3].min(axis=0)
         bbox_max = points[:, :3].max(axis=0)
         bbox_center = (bbox_min + bbox_max) / 2
@@ -333,7 +346,11 @@ class HRPOcclusion(PointCloudsTransform):
 
     def get_params_dependent_on_targets(self, params):
         points = params["points"]
-        
+        # Handle empty points safely
+        if points is None or points.shape[0] == 0:
+            camera_pos = np.array(self.camera_position) if self.camera_position is not None else np.array([0.0, 0.0, 0.0])
+            return {"mask": np.zeros(0, dtype=bool), "camera_position": camera_pos}
+
         # Get camera position
         if self.camera_position is None:
             camera_pos = get_random_camera(points)

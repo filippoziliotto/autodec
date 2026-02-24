@@ -70,7 +70,7 @@ shapenet:
 trainer:
   save_path: checkpoints
   save_every_n_epochs: 100
-  num_epochs: 1000
+  num_epochs: 2000
   batch_size: 32
   num_workers: 4
   evaluate_every_n_epochs: 10

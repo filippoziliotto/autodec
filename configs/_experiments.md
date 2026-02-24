@@ -61,3 +61,7 @@ cost & loss uses only geometric and exist
 
 ## Exp 013 - BCE & Geometric loss
 As before but CD instead of 1-1 matching of geometric points
+
+
+# Exp 004 - BCE & Parameter & Geometric loss & Occlusions
+normalization and occlusions

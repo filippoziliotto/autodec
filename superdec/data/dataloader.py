@@ -74,8 +74,8 @@ def get_occlusion_transforms(split: str, cfg):
     
     return Compose([
         BackFaceCulling(p=0.5),
-        RandomOcclusion(p=0.5),
-        # HRPOcclusion(p=0.5), # kind of slow
+        RandomOcclusion(p=0.2),
+        HRPOcclusion(p=0.1), # kind of slow
     ])
 
 class ScenesDataset(Dataset):

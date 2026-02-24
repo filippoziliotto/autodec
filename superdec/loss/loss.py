@@ -659,6 +659,9 @@ class ParamLossGeometric(ParamLoss):
             return self.geometric_error_11(pred, gt, mask)
     
     def tapering_mse(self, pred, gt, mask=None):
+        if not self.geometric_cd:
+            return super().tapering_mse(pred, gt, mask)
+
         # pred shape (B, P, 2)
         _pred = pred.sum(-1).unsqueeze(-1)
         _gt = gt.sum(-1).unsqueeze(-1)
@@ -669,6 +672,9 @@ class ParamLossGeometric(ParamLoss):
         return (loss * mask).sum() / (mask.sum() * 2 + 1e-6)
     
     def bending_mse(self, pred_k, pred_a, gt, mask=None):
+        if not self.geometric_cd:
+            return super().bending_mse(pred_k, pred_a, gt, mask)
+
         _pred_k = pred_k.sum(-1).unsqueeze(-1)
         _gt_k = gt[..., 0::2].sum(-1).unsqueeze(-1)
         
@@ -701,8 +707,15 @@ class ParamLossGeometric(ParamLoss):
             C = torch.zeros((B, P, P), device=device)
 
             if self.c_geometric > 0:
-                gt_sq_etas_ext = gt_sq_etas.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
-                gt_sq_omegas_ext = gt_sq_omegas.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
+                # For cost computation downsample etas and omegas
+                n_pts = gt_sq_etas.shape[-1]
+                gt_sq_etas_ds, gt_sq_omegas_ds = gt_sq_etas, gt_sq_omegas
+                if n_pts > 64:
+                    idx = torch.linspace(0, n_pts - 1, steps=64, dtype=torch.int, device=gt_sq_etas.device)
+                    gt_sq_etas_ds = gt_sq_etas.index_select(-1, idx)
+                    gt_sq_omegas_ds = gt_sq_omegas.index_select(-1, idx)
+                gt_sq_etas_ext = gt_sq_etas_ds.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
+                gt_sq_omegas_ext = gt_sq_omegas_ds.reshape(B, -1).unsqueeze(1).expand(-1, P, -1)
                 pts = parametric_to_points_extended(
                     out_dict['trans'], 
                     out_dict['rotate'], 
