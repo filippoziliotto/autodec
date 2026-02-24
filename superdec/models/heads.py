@@ -20,6 +20,15 @@ class SuperDecHead(nn.Module):
             self.tapering_head = nn.Linear(emb_dims, 2)
             self.bending_k_head = nn.Linear(emb_dims, 3)
             self.bending_a_head = nn.Linear(emb_dims, 3)
+            # Initialize tapering and bending heads: tapering and bending_a to 0,
+            # and initialize bending_k bias to -6 so sigmoid produces a small
+            # initial bending value (sigmoid(-6) ~ 0.0025 -> near zero)
+            nn.init.zeros_(self.tapering_head.weight)
+            nn.init.zeros_(self.tapering_head.bias)
+            nn.init.zeros_(self.bending_a_head.weight)
+            nn.init.zeros_(self.bending_a_head.bias)
+            nn.init.zeros_(self.bending_k_head.weight)
+            nn.init.constant_(self.bending_k_head.bias, -6.0)
 
 
     def forward(self, x):

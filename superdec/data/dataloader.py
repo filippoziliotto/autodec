@@ -208,6 +208,7 @@ class ObjectDataset(Dataset):
         self.use_fps = getattr(cfg, 'use_fps', False)
         self.load_occupancy = (split == 'val') or getattr(cfg, 'load_occupancy', False)
         
+        self.gt_sampler = None
         self.valid_models = None
         self.gt_params_path = getattr(cfg, f'gt_{split}_path', None)
         self.gt_data, self.gt_mapping = {}, {}
