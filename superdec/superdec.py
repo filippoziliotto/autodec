@@ -38,6 +38,7 @@ class SuperDec(nn.Module):
             nn.Linear(self.emb_dims, self.emb_dims),
         )
         
+        self.clear_orientation_heads = getattr(ctx, 'clear_orientation_heads', False)
         head_type = getattr(ctx, 'head_type', 'heads')
         print(f"Using SuperDecHead type {head_type}")
         if head_type == 'heads':
@@ -58,6 +59,17 @@ class SuperDec(nn.Module):
         optionally enforcing strict loading for other keys.
         """
         allowed_prefixes = ["heads.tapering_head", "heads.bending_k_head", "heads.bending_a_head"]
+        if self.clear_orientation_heads:
+            del state_dict['heads.scale_head.weight']
+            del state_dict['heads.scale_head.bias']
+            del state_dict['heads.rot_head.weight']
+            del state_dict['heads.rot_head.bias']
+            allowed_prefixes.append("heads.scale_head")
+            allowed_prefixes.append("heads.rot_head")
+            
+            warnings.warn(
+                "Clearing all orientation dependent heads."
+            )
         
         # Handle rot_head shape mismatch (4 -> 6)
         if self.heads.rotation6d and 'heads.rot_head.weight' in state_dict and state_dict['heads.rot_head.weight'].shape[0] == 4:

@@ -3,12 +3,12 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_iou_041
+run_name: shapenet_iou_131
 dataset: shapenet
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/shapenet/ckpt.pt
+  resume_from: checkpoints/shapenet_iou_031/epoch_1000.pt
   keep_epoch: False
 
 superdec:
@@ -72,7 +72,7 @@ trainer:
   augmentations: True
   occlusions: False 
 optimizer:
-  lr: 2e-4 #1e-4 #1e-4   0.001
+  lr: 4e-4 #1e-4 #1e-4   0.001
   weight_decay: 0 # default
   betas: [0.9, 0.999] # default
   enable_scheduler: True # True
@@ -91,10 +91,10 @@ loss:
   
   # IoU
   truncation: 0.05
-  w_sdf: 0.25
+  w_sdf: 0.2
   w_bbox: 0.2
   w_iou: 0.2
-  w_overlap: 15.0
+  w_overlap: 5.0
   
 visualization:
   res_primitives: 40

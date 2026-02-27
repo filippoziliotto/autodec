@@ -221,9 +221,10 @@ class ObjectDataset(Dataset):
                 n_samples = cfg.geometric_samples
                 self.gt_sampler = EqualDistanceSamplerSQ(n_samples=n_samples, D_eta=0.05, D_omega=0.05)
             
-            self.filter_cfg = getattr(cfg, 'filter', None)
-            if self.filter_cfg is not None:
-                self._load_filter()
+            if split == 'train':
+                self.filter_cfg = getattr(cfg, 'filter', None)
+                if self.filter_cfg is not None:
+                    self._load_filter()
     
     def _load_gt_params(self):
         if not os.path.exists(self.gt_params_path):

@@ -15,6 +15,12 @@ class SuperDecHead(nn.Module):
         self.t_head = nn.Linear(emb_dims, 3)
         self.exist_head = nn.Linear(emb_dims, 1)
         
+        if getattr(ctx, 'clear_orientation_heads', False):
+            nn.init.constant_(self.t_head.bias, 0.5)
+            nn.init.normal_(self.t_head.weight, mean=0.0, std=1e-3)
+            nn.init.orthogonal_(self.rot_head.weight)
+            nn.init.zeros_(self.rot_head.bias) # i dont want to bias towards the identity
+        
         self.extended = getattr(ctx, 'extended', False)
         if self.extended:
             extended_non_zero_init = getattr(ctx, 'extended_non_zero_init', False)
