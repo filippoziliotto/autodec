@@ -38,6 +38,12 @@ def main(cfg: DictConfig):
         )
 
     model = build_model(cfg).to(device)
+    
+    dataloaders, train_sampler = build_dataloaders(cfg, is_distributed=is_distributed)
+
+    optimizer = build_optimizer(cfg, model)
+    scheduler = build_scheduler(cfg, optimizer, len(dataloaders['train'])) # None if disabled
+    
     # Resume from checkpoint if specified
     start_epoch = 0
     best_val_loss = float('inf')
@@ -55,10 +61,6 @@ def main(cfg: DictConfig):
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], find_unused_parameters=False)
 
-    dataloaders, train_sampler = build_dataloaders(cfg, is_distributed=is_distributed)
-
-    optimizer = build_optimizer(cfg, model)
-    scheduler = build_scheduler(cfg, optimizer, len(dataloaders['train'])) # None if disabled
     loss_fn = build_loss(cfg).to(device)
 
     

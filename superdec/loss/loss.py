@@ -3,174 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from geomloss import SamplesLoss
 
+from superdec.loss.utils import sampling_from_parametric_space_to_equivalent_points, parametric_to_points_extended, sdf_batch
 from superdec.loss.sampler import EqualDistanceSamplerSQ
 from superdec.utils.transforms import transform_to_primitive_frame, quat2mat, mat2quat
 from superdec.utils.safe_operations import safe_pow, safe_mul
-
-def sampling_from_parametric_space_to_equivalent_points(
-    shape_params,
-    epsilons,
-    sq_sampler
-):
-    """
-    Given the sampling steps in the parametric space, we want to ge the actual
-    3D points.
-    """
-    def fexp(x, p):
-        return torch.sign(x)*(torch.abs(x)**p)
-    B = shape_params.shape[0]  # batch size
-    M = shape_params.shape[1]  # number of primitives
-    S = sq_sampler.n_samples
-
-    etas, omegas = sq_sampler.sample_on_batch(
-        shape_params.detach().cpu().numpy(),
-        epsilons.detach().cpu().numpy()
-    )
-    # Make sure we don't get nan for gradients
-    etas[etas == 0] += 1e-6
-    omegas[omegas == 0] += 1e-6
-
-    # Move to tensors
-    etas = shape_params.new_tensor(etas)
-    omegas = shape_params.new_tensor(omegas)
-
-    # Make sure that all tensors have the right shape
-    a1 = shape_params[:, :, 0].unsqueeze(-1)  # size BxMx1
-    a2 = shape_params[:, :, 1].unsqueeze(-1)  # size BxMx1
-    a3 = shape_params[:, :, 2].unsqueeze(-1)  # size BxMx1
-    e1 = epsilons[:, :, 0].unsqueeze(-1)  # size BxMx1
-    e2 = epsilons[:, :, 1].unsqueeze(-1)  # size BxMx1
-
-    x = a1 * fexp(torch.cos(etas), e1) * fexp(torch.cos(omegas), e2)
-    y = a2 * fexp(torch.cos(etas), e1) * fexp(torch.sin(omegas), e2)
-    z = a3 * fexp(torch.sin(etas), e1)
-
-    x = ((x > 0).float() * 2 - 1) * torch.max(torch.abs(x), x.new_tensor(1e-6))
-    y = ((y > 0).float() * 2 - 1) * torch.max(torch.abs(y), x.new_tensor(1e-6))
-    z = ((z > 0).float() * 2 - 1) * torch.max(torch.abs(z), x.new_tensor(1e-6))
-
-    # Compute the normals of the SQs
-    nx = (torch.cos(etas)**2) * (torch.cos(omegas)**2) / x
-    ny = (torch.cos(etas)**2) * (torch.sin(omegas)**2) / y
-    nz = (torch.sin(etas)**2) / z
-
-    return torch.stack([x, y, z], -1), torch.stack([nx, ny, nz], -1)
-
-def parametric_to_points_extended(
-    translation,
-    rotation,
-    scale,
-    shape,
-    tapering,
-    bending_k,
-    bending_a,
-    etas,
-    omegas
-):
-    """
-    Given the sampling steps in the parametric space, get the actual 3D points
-    with tapering and bending deformations applied.
-    """
-    def fexp(x, p):
-        return torch.sign(x)*(torch.abs(x)**p)
-        
-    def apply_bending_axis_pt(x_c, y_c, z_c, val_kb, val_alpha, axis):
-        """Batched, differentiable bending along a given axis."""
-        if axis == 'z':
-            u, v, w = x_c, y_c, z_c
-        elif axis == 'x':
-            u, v, w = y_c, z_c, x_c
-        elif axis == 'y':
-            u, v, w = z_c, x_c, y_c
-            
-        sin_alpha = torch.sin(val_alpha)
-        cos_alpha = torch.cos(val_alpha)
-        
-        beta = torch.atan2(v, u)
-        r = torch.sqrt(u**2 + v**2) * torch.cos(val_alpha - beta)
-
-        # Differentiable check to avoid division by zero when kb ~ 0
-        mask = (torch.abs(val_kb) >= 1e-3)
-        kb_safe = torch.where(mask, val_kb, val_kb.new_tensor(1e-3))
-        
-        inv_kb = 1.0 / kb_safe
-        gamma = w * kb_safe
-        rho = inv_kb - r
-        R = inv_kb - rho * torch.cos(gamma)
-
-        expr = (R - r)
-        u_bent = u + expr * cos_alpha
-        v_bent = v + expr * sin_alpha
-        w_bent = rho * torch.sin(gamma)
-        
-        # Apply transformation only where kb >= 1e-3
-        u_out = torch.where(mask, u_bent, u)
-        v_out = torch.where(mask, v_bent, v)
-        w_out = torch.where(mask, w_bent, w)
-        
-        if axis == 'z':
-            return u_out, v_out, w_out
-        elif axis == 'x':
-            return w_out, u_out, v_out
-        elif axis == 'y':
-            return v_out, w_out, u_out
-
-    B = scale.shape[0]  # batch size
-    M = scale.shape[1]  # number of primitives
-
-    # Make sure that all tensors have the right shape
-    a1 = scale[:, :, 0].unsqueeze(-1)  # size BxMx1
-    a2 = scale[:, :, 1].unsqueeze(-1)  # size BxMx1
-    a3 = scale[:, :, 2].unsqueeze(-1)  # size BxMx1
-    e1 = shape[:, :, 0].unsqueeze(-1)  # size BxMx1
-    e2 = shape[:, :, 1].unsqueeze(-1)  # size BxMx1
-
-    x = a1 * fexp(torch.cos(etas), e1) * fexp(torch.cos(omegas), e2)
-    y = a2 * fexp(torch.cos(etas), e1) * fexp(torch.sin(omegas), e2)
-    z = a3 * fexp(torch.sin(etas), e1)
-
-    # Clamp magnitude to avoid NaN/Inf in normal computation
-    x = ((x > 0).float() * 2 - 1) * torch.max(torch.abs(x), x.new_tensor(1e-6))
-    y = ((y > 0).float() * 2 - 1) * torch.max(torch.abs(y), y.new_tensor(1e-6))
-    z = ((z > 0).float() * 2 - 1) * torch.max(torch.abs(z), z.new_tensor(1e-6))
-
-    # --- Apply Tapering ---
-    kx = tapering[:, :, 0].unsqueeze(-1)
-    ky = tapering[:, :, 1].unsqueeze(-1)
-    z_norm = z / a3
-    fx = kx * z_norm + 1.0
-    fy = ky * z_norm + 1.0
-    x = x * fx
-    y = y * fy
-
-    # --- Apply Bending ---
-    x, y, z = apply_bending_axis_pt(
-        x, y, z, 
-        bending_k[:, :, 2].unsqueeze(-1), 
-        bending_a[:, :, 2].unsqueeze(-1), 
-        'y'
-    )
-    x, y, z = apply_bending_axis_pt(
-        x, y, z, 
-        bending_k[:, :, 1].unsqueeze(-1), 
-        bending_a[:, :, 1].unsqueeze(-1), 
-        'x'
-    )
-    x, y, z = apply_bending_axis_pt(
-        x, y, z, 
-        bending_k[:, :, 0].unsqueeze(-1), 
-        bending_a[:, :, 0].unsqueeze(-1), 
-        'z'
-    )
-
-    pts = torch.stack([x, y, z], -1)
-    pts_world = torch.matmul(
-        rotation.unsqueeze(2),    # (B, P, 1, 3, 3)
-        pts.unsqueeze(-1)        # (B, P, N, 3, 1)
-    ).squeeze(-1) + translation.unsqueeze(2)
-    return pts_world
 
 class BaseLoss(nn.Module):
     def __init__(self, cfg):
@@ -298,9 +135,9 @@ class SuperDecLoss(BaseLoss):
         loss_dict['all'] = loss.item()
         return loss, loss_dict
 
-class ParamLoss(nn.Module):
+class ParamLoss(BaseLoss):
     def __init__(self, cfg):
-        super().__init__()
+        super().__init__(cfg)
         self.w_exist = getattr(cfg, 'w_exist', 1.0)
         self.w_scale = getattr(cfg, 'w_scale', 1.0)
         self.w_shape = getattr(cfg, 'w_shape', 1.0)
@@ -308,7 +145,6 @@ class ParamLoss(nn.Module):
         self.w_rot = getattr(cfg, 'w_rot', 1.0)
         self.w_tapering = getattr(cfg, 'w_tapering', 1.0)
         self.w_bending = getattr(cfg, 'w_bending', 1.0)
-        self.w_sps = getattr(cfg, 'w_sps', 0.0)
         
         self.c_exist = getattr(cfg, 'c_exist', 0.0)
         self.c_scale = getattr(cfg, 'c_scale', 0.0)
@@ -473,9 +309,7 @@ class ParamLoss(nn.Module):
             loss_dict['param_bending'] = bend_loss.item()
         
         # stop trainer from complaining about unused parameters (TODO should we use it?)
-        sparsity_loss = self.get_sparsity_loss(out_dict['assign_matrix'])
-        loss += self.w_sps * sparsity_loss
-        loss_dict['sparsity_loss'] = sparsity_loss.item()
+        loss += self.compute_common_losses(out_dict, loss_dict)
         
         loss_dict['all'] = loss.item()
         return loss, loss_dict
@@ -612,9 +446,7 @@ class ParamLossPoles(ParamLoss):
             loss_dict['param_bending'] = bend_loss.item()
         
         # stop trainer from complaining about unused parameters (TODO should we use it?)
-        sparsity_loss = self.get_sparsity_loss(out_dict['assign_matrix'])
-        loss += self.w_sps * sparsity_loss
-        loss_dict['sparsity_loss'] = sparsity_loss.item()
+        loss += self.compute_common_losses(out_dict, loss_dict)
         
         loss_dict['all'] = loss.item()
         return loss, loss_dict
@@ -623,13 +455,11 @@ class ParamLossGeometric(ParamLoss):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.geometric_cd = getattr(cfg, 'geometric_cd', False) 
-        self.geometric_sinkhorn = getattr(cfg, 'geometric_sinkhorn', False) 
-        if self.geometric_sinkhorn:
-            self.sinkhorn = SamplesLoss(loss="sinkhorn", p=2, blur=.05)
-        self.free_axis = self.geometric_cd or self.geometric_sinkhorn
+        self.free_axis = self.geometric_cd
         
         self.w_geometric = getattr(cfg, 'w_geometric', 1.0)
         self.c_geometric = getattr(cfg, 'c_geometric', 1.0)
+        # self.w_sdf = getattr(cfg, 'w_sdf', 0.0)
     
     def geometric_error_cd(self, pred, gt, mask=None):
         if mask is None:
@@ -648,28 +478,6 @@ class ParamLossGeometric(ParamLoss):
         chamfer_per_prim = mean_pred_to_gt + mean_gt_to_pred  # (B, P)
         return (chamfer_per_prim * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
     
-    
-    def geometric_error_sinkhorn(self, pred, gt, mask=None):
-        if mask is None:
-            B, P, _, _ = gt.shape
-            gt_ext = gt.unsqueeze(1).expand(B, P, P, -1, 3)
-            dists = torch.norm(pred.unsqueeze(4) - gt_ext.unsqueeze(3), dim=-1)
-            mean_pred_to_gt = dists.min(dim=4)[0].mean(dim=3)  # (B, P_pred, P_gt)
-            mean_gt_to_pred = dists.min(dim=3)[0].mean(dim=3)  # (B, P_pred, P_gt)
-            chamfer = mean_pred_to_gt + mean_gt_to_pred
-            return chamfer
-
-        # Masked mode: compute per-primitive sinkhorn and aggregate using mask
-        N = pred.shape[-2]
-        pred_flat = pred.reshape(-1, N, 3)
-        gt_flat = gt.reshape(-1, N, 3)
-        erase_grads = not torch.is_grad_enabled()
-        sinkhorn_loss = self.sinkhorn(pred_flat, gt_flat).view(pred.shape[0], pred.shape[1])
-        if erase_grads and torch.is_grad_enabled():
-            sinkhorn_loss = sinkhorn_loss.detach()
-            torch.set_grad_enabled(False)
-        return (sinkhorn_loss * mask.squeeze(-1)).sum() / (mask.sum() + 1e-6)
-    
     def geometric_error_11(self, pred, gt, mask=None):
         if mask is None:
             B, P, _, _ = gt.shape
@@ -683,8 +491,6 @@ class ParamLossGeometric(ParamLoss):
     def geometric_error(self, pred, gt, mask=None):
         if self.geometric_cd:
             return self.geometric_error_cd(pred, gt, mask)
-        elif self.geometric_sinkhorn:
-            return self.geometric_error_sinkhorn(pred, gt, mask)
         else:
             return self.geometric_error_11(pred, gt, mask)
     
@@ -837,6 +643,36 @@ class ParamLossGeometric(ParamLoss):
         loss += self.w_geometric * geometric_loss
         loss_dict['param_geometric'] = geometric_loss.item()
         
+        # pc = batch['points'].cuda().float() # [B, N_pc, 3]
+        # if self.w_sdf > 0:
+        #     # SDF on Surface Points
+        #     all_sdfs_surf = sdf_batch(pc, out_dict) #(B, N, M_surf)
+        #     assign_probs = out_dict['assign_matrix'].transpose(1, 2) #(B, N, M_surf)
+            
+        #     relu_sdfs_trunc = torch.abs(all_sdfs_surf) + (out_dict['exist'] < 0.5).detach()
+        #     weighted_relu_sdf = (assign_probs * relu_sdfs_trunc).sum(dim=1)
+        #     L_sdf = weighted_relu_sdf.mean()
+        #     loss += self.w_sdf * L_sdf
+        #     loss_dict['sdf'] = L_sdf.item()
+            
+        # if self.w_cd > 0:
+        #     B_dim, P_dim, N_sq, _ = pts.shape
+        #     N_pc = pc.shape[1]
+            
+        #     pc_exp = pc.unsqueeze(1).expand(-1, P_dim, -1, -1).reshape(B_dim * P_dim, N_pc, 3)
+        #     pts_exp = pts.reshape(B_dim * P_dim, N_sq, 3)
+            
+        #     D = torch.cdist(pc_exp, pts_exp, p=2.0) ** 2 # [B*P, N_pc, N_sq]
+        #     pc_to_gt_sq = D.min(dim=2)[0].reshape(B_dim, P_dim, N_pc) # [B, P, N_pc]
+            
+        #     # Compute squared distances
+        #     diff = pts.unsqueeze(3) - pc.unsqueeze(2)  # [B, P, S, N, 3]
+        #     D = (diff ** 2).sum(-1)                            # [B, P, S, N]
+
+        #     # Point-to-Primitive Chamfer
+        #     pcl_to_prim_loss = D.min(dim=2)[0]      
+        #     pcl_to_prim_loss = (pcl_to_prim_loss.transpose(-1,-2) * weights).sum(-1).mean()
+
         # Scale
         scale_loss = self.scale_mse(out_dict['scale'], gt_scale, mask)
         loss += self.w_scale * scale_loss
@@ -872,7 +708,8 @@ class ParamLossGeometric(ParamLoss):
         # stop trainer from complaining about unused parameters (TODO should we use it?)
         sparsity_loss = self.get_sparsity_loss(out_dict['assign_matrix'])
         loss += self.w_sps * sparsity_loss
-        loss_dict['sparsity_loss'] = sparsity_loss.item()
+        
+        loss += self.compute_common_losses(out_dict, loss_dict)
         
         loss_dict['all'] = loss.item()
         return loss, loss_dict
@@ -905,104 +742,6 @@ class IoULoss(BaseLoss):
         # translate
         poles_world = poles_world + trans.unsqueeze(2)
         return poles_world
-    
-    def inverse_bending_axis(self, x, y, z, kb, alpha, axis):
-        if axis == 'z':
-            u, v, w = x, y, z
-        elif axis == 'x':
-            u, v, w = y, z, x
-        elif axis == 'y':
-            u, v, w = z, x, y
-        else:
-             return x, y, z
-
-        # Precompute reciprocal efficiently
-        inv_kb = 1.0 / (kb + 1e-6)
-        
-        angle_offset = torch.atan2(v, u)
-        R = torch.sqrt(u**2 + v**2) * torch.cos(alpha - angle_offset)
-        gamma = torch.atan2(w, inv_kb - R)
-        r = inv_kb - torch.sqrt(w**2 + (inv_kb - R)**2)
-        
-        u = u - (R - r) * torch.cos(alpha)
-        v = v - (R - r) * torch.sin(alpha)
-        w = inv_kb * gamma
-
-        if axis == 'z':
-            return u, v, w
-        elif axis == 'x':
-            return w, u, v
-        elif axis == 'y':
-            return v, w, u
-    
-    def sdf_batch(self, points, out_dict):
-        # points: (B, M, 3) -> expects transpose for math -> (B, 3, M) roughly
-        points = points.transpose(1, 2) # (B, 3, M)
-        
-        scale = out_dict['scale'] # (B, N, 3)
-        exponents = out_dict['shape'] # (B, N, 2)
-        rotate = out_dict['rotate'] # (B, N, 3, 3)
-        trans = out_dict['trans'] # (B, N, 3)
-
-        B, _, M = points.shape
-        N = scale.shape[1]
-        
-        points_expanded = points.unsqueeze(1) # (B, 1, 3, M)
-        t = trans.unsqueeze(-1) # (B, N, 3, 1)
-        points_centered = points_expanded - t # (B, N, 3, M)
-        
-        X = torch.matmul(rotate.transpose(-2, -1), points_centered) # (B, N, 3, M)
-        
-        e1 = exponents[..., 0].unsqueeze(-1)
-        e2 = exponents[..., 1].unsqueeze(-1)
-        sx = scale[..., 0].unsqueeze(-1)
-        sy = scale[..., 1].unsqueeze(-1)
-        sz = scale[..., 2].unsqueeze(-1)
-        
-        x = X[:, :, 0, :]
-        y = X[:, :, 1, :]
-        z = X[:, :, 2, :]
-        
-        eps = 1e-6
-        x = torch.where(x > 0, 1.0, -1.0) * torch.clamp(torch.abs(x), min=eps)
-        y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
-        z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
-        
-        # Apply tapering
-        if 'tapering' in out_dict:
-            tapering = out_dict['tapering'] # (B, N, 2)
-            kx = tapering[..., 0].unsqueeze(-1)
-            ky = tapering[..., 1].unsqueeze(-1)
-            
-            fx = safe_mul(kx/sz, z) + 1
-            fy = safe_mul(ky/sz, z) + 1
-            
-            # Check tapering signs
-            fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
-            fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
-            
-            x = x / fx
-            y = y / fy
-
-        # Apply bending
-        if 'bending_k' in out_dict and 'bending_a' in out_dict:
-            bending_k = out_dict['bending_k'] # (B, N, 3)
-            bending_a = out_dict['bending_a'] # (B, N, 3)
-            
-            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 0].unsqueeze(-1), bending_a[..., 0].unsqueeze(-1), 'z')
-            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 1].unsqueeze(-1), bending_a[..., 1].unsqueeze(-1), 'x')
-            x, y, z = self.inverse_bending_axis(x, y, z, bending_k[..., 2].unsqueeze(-1), bending_a[..., 2].unsqueeze(-1), 'y')
-        
-        r0 = torch.sqrt(x**2 + y**2 + z**2)
-        
-        term1 = safe_pow(safe_pow(x / sx, 2), 1 / e2)
-        term2 = safe_pow(safe_pow(y / sy, 2), 1 / e2)
-        term3 = safe_pow(safe_pow(z / sz, 2), 1 / e1)
-        
-        f_func = safe_pow(safe_pow(term1 + term2, e2 / e1) + term3, -e1 / 2)
-        
-        sdf = safe_mul(r0, (1 - f_func))
-        return sdf # (B, N, M)
 
     def forward(self, batch, out_dict):
         pc, normals = batch['points'].cuda().float(), batch['normals'].cuda().float()
@@ -1013,15 +752,15 @@ class IoULoss(BaseLoss):
         loss_dict = {}
         
         # 1. SDF on Surface Points
-        all_sdfs_surf = self.sdf_batch(pc, out_dict) #(B, N, M_surf)
+        all_sdfs_surf = sdf_batch(pc, out_dict) #(B, N, M_surf)
         exist_probs = out_dict['exist'].reshape(all_sdfs_surf.shape[0], all_sdfs_surf.shape[1]) # (B, N)
         exist_weights = exist_probs.unsqueeze(-1) # (B, N, 1)
         assign_probs = out_dict['assign_matrix'].transpose(1, 2) #(B, N, M_surf)
         
         temperature = 1e-2
         sdfs_surf_trunc = (torch.sigmoid(all_sdfs_surf / temperature) - 0.5) * 2 * self.truncation
-        relu_sdfs_trunc = torch.nn.LeakyReLU()(sdfs_surf_trunc)
-        weighted_relu_sdf = (assign_probs * relu_sdfs_trunc).sum(dim=1)
+        relu_sdfs_trunc = torch.abs(torch.nn.LeakyReLU()(sdfs_surf_trunc)) 
+        weighted_relu_sdf = (assign_probs * relu_sdfs_trunc).sum(dim=1) #(B, M_surf)
         L_sdf = 16 * weighted_relu_sdf.mean()
 
         loss += self.w_sdf * L_sdf
@@ -1043,7 +782,7 @@ class IoULoss(BaseLoss):
         loss_dict['bbox'] = L_bbox.item()
 
         # 3. IoU Loss
-        all_sdfs_iou = self.sdf_batch(points_iou, out_dict) # (B, N, M_iou)
+        all_sdfs_iou = sdf_batch(points_iou, out_dict) # (B, N, M_iou)
         
         temperature_iou = 1e-3
         prob_prim = torch.sigmoid(-all_sdfs_iou / temperature_iou)
@@ -1056,7 +795,7 @@ class IoULoss(BaseLoss):
         pred_occ = 1.0 - torch.exp(torch.sum(torch.log(1.0 - p_occupied), dim=1)) # (B, M_iou)
         intersection = (pred_occ * gt_occ).sum(dim=1)
         union = (pred_occ + gt_occ - pred_occ * gt_occ).sum(dim=1)
-        iou = intersection / torch.clamp(union, min=1.0)
+        iou = (intersection + 1e-6) / (torch.clamp(union, min=1.0) + 1e-6)
         L_iou = -torch.log(iou).mean()
         
         loss += self.w_iou * L_iou
@@ -1066,9 +805,9 @@ class IoULoss(BaseLoss):
         # 4. Overlap/Regularization Loss
         temperature_overlap = 1e-3
         indicator = torch.sigmoid(-(all_sdfs_iou + self.truncation) / temperature_overlap)
-        weighted_indicator = exist_weights * indicator # (B, N, M)
-        overlap_count = torch.sum(weighted_indicator, dim=1) # (B, M)
-        L_overlap = 1e-1 * overlap_count.mean()
+        weighted_indicator = (exist_weights > 0.5) * indicator # (B, N, M)
+        overlap_count = torch.relu(torch.sum(weighted_indicator, dim=1) - 1) # (B, M)
+        L_overlap = overlap_count.mean()
         
         loss += self.w_overlap * L_overlap
         loss_dict['overlap'] = L_overlap.item()

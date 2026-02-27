@@ -22,6 +22,11 @@ As before but single mlp head
 ## Exp 031 - BCE & Parameter loss
 As before but multi mlp head (1 per param "group")
 
+## Exp 041 - BCE & Parameter loss
+multi mlp head but filter on     
+  metric: iou
+  threshold: 0.87
+
 # Exp 002 - BCE & Parameter & Geometric loss
 ### Cost and Weights
 cost uses only geometric and exist
@@ -46,6 +51,10 @@ plus mse on tapering and bending ks sum
 ## Exp 022 - BCE & Geometric loss
 back to 1-1 geometric loss but remove rotation loss
 and increase bending and scale weight 
+
+## Exp 032 - BCE & Geometric loss & Assign Cd
+introduced a pc to sq chamfer distance loss weighted on the assign matrix
+this gives some training signal to the assign matrix
 
 # Exp 003 - BCE & Geometric loss
 cost & loss uses only geometric and exist

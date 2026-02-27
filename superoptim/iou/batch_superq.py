@@ -407,7 +407,7 @@ class BatchSuperQMulti(nn.Module):
 
         temperature = 1e-3
         indicator = torch.sigmoid(-(all_sdfs+self.truncation) / temperature)
-        overlap = torch.sum(torch.relu(indicator), dim=1)
+        overlap = torch.relu(torch.sum(indicator, dim=1) -1)
         return {
             'sdfs': min_sdf,
             'overlap': overlap,

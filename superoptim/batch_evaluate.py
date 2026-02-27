@@ -21,6 +21,7 @@ def main(cfg: DictConfig):
     
     module_type = cfg.get('type', 'iou')
     dataset = cfg.dataloader.get('dataset', 'shapenet')
+    source_folder = cfg.get('source_folder', dataset)
     split = cfg.get(dataset).get('split', 'test')
     small = cfg.get('small', False)
 
@@ -34,7 +35,7 @@ def main(cfg: DictConfig):
         return
 
     print(f"Evaluating {module_type} on {dataset} {split}...")
-    input_npz = f"data/output_npz/{dataset}/{dataset}_{split}.npz"
+    input_npz = f"data/output_npz/{source_folder}/{dataset}_{split}.npz"
     # Determine extras suffix (used for folder naming)
     extras = ""
     if module_type == "iou":
@@ -43,7 +44,7 @@ def main(cfg: DictConfig):
         if getattr(cfg.optimization, "reorient", True): extras += "r"
         if getattr(cfg.optimization, "pruning", False): extras += "p"
     folder_name = module_type + (f"_{extras}" if extras else "")
-    output_dir = os.path.join("data", "output_npz", dataset, folder_name)
+    output_dir = os.path.join("data", "output_npz", source_folder, folder_name)
     if small:
         output_dir = output_dir.replace("output_npz", "output_npz/small")
     os.makedirs(output_dir, exist_ok=True)
@@ -193,7 +194,6 @@ def main(cfg: DictConfig):
                 mesh = pred_handler.get_mesh(idx, resolution=100, colors=False)
             except Exception as e:
                 print(f"Error generating mesh for object {idx}: {e}")
-                exit()
 
             try:
                 gt_pc = points[b_idx].cpu().numpy()
@@ -202,7 +202,6 @@ def main(cfg: DictConfig):
                 out_dict_cur['iou'] = float(batch_ious[b_idx]) if batch_ious is not None else 0.0
             except Exception as e:
                 print(f"Eval mesh failed: {e}")
-                exit()
             
             num_prim = (pred_handler.exist[idx] > 0.5).sum()
             aggregated_metrics['chamfer-L1'] += out_dict_cur['chamfer-L1']
