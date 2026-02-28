@@ -39,6 +39,7 @@ def main(cfg: DictConfig) -> None:
     with open(config_path) as f:
         configs = OmegaConf.load(f)
 
+    OmegaConf.update(configs, "superdec.clear_orientation_heads", False)
     model = SuperDec(configs.superdec).to(device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()

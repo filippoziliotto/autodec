@@ -18,6 +18,8 @@ class SuperDecHead(nn.Module):
         if getattr(ctx, 'clear_orientation_heads', False):
             nn.init.constant_(self.t_head.bias, 0.5)
             nn.init.normal_(self.t_head.weight, mean=0.0, std=1e-3)
+            nn.init.constant_(self.shape_head.bias, 1.0)
+            nn.init.normal_(self.shape_head.weight, mean=0.0, std=1e-3)
             nn.init.orthogonal_(self.rot_head.weight)
             nn.init.zeros_(self.rot_head.bias) # i dont want to bias towards the identity
         

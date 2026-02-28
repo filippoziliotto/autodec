@@ -3,7 +3,7 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_geom_001
+run_name: shapenet_geom_011
 dataset: shapenet
 device: cuda
 
@@ -13,7 +13,7 @@ checkpoints:
 
 superdec:
   extended: true
-  extended_non_zero_init: true
+  extended_non_zero_init: false
   clear_orientation_heads: true
   decoder:
     n_queries: 16
@@ -77,7 +77,7 @@ trainer:
   augmentations: True
   occlusions: False 
 optimizer:
-  lr: 4e-4 #1e-4 #1e-4   0.001
+  lr: 3e-4 #1e-4 #1e-4   0.001
   weight_decay: 0 # default
   betas: [0.9, 0.999] # default
   enable_scheduler: True # True
@@ -92,7 +92,7 @@ scheduler:
 loss:
   type: geom
   w_geometric: 10.0
-  w_geometric_f: 15.0
+  w_geometric_f: 10.0
   w_exist: 1.0
 
   c_geometric: 10.0 

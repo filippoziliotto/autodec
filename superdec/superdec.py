@@ -62,9 +62,12 @@ class SuperDec(nn.Module):
         if self.clear_orientation_heads:
             del state_dict['heads.scale_head.weight']
             del state_dict['heads.scale_head.bias']
+            del state_dict['heads.shape_head.weight']
+            del state_dict['heads.shape_head.bias']
             del state_dict['heads.rot_head.weight']
             del state_dict['heads.rot_head.bias']
             allowed_prefixes.append("heads.scale_head")
+            allowed_prefixes.append("heads.shape_head")
             allowed_prefixes.append("heads.rot_head")
             
             warnings.warn(

@@ -745,8 +745,8 @@ class LossGeometric(ParamLossGeometric):
             out_dict['tapering'],
             out_dict['bending_k'],
             out_dict['bending_a'],
-            pred_sq_etas,
-            pred_sq_omegas
+            gt_sq_etas,
+            gt_sq_omegas
         )
         geometric_loss_forced = self.geometric_error_cd(pred_pts_forced, gt_pts, mask)
         loss += self.w_geometric_f * geometric_loss_forced
