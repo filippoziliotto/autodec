@@ -3,18 +3,18 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_geom_011
+run_name: shapenet_geom_003
 dataset: shapenet
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/shapenet/ckpt.pt
+  resume_from: checkpoints/shapenet_iou_051/epoch_1000.pt
   keep_epoch: False
 
 superdec:
   extended: true
-  extended_non_zero_init: false
-  clear_orientation_heads: true
+  extended_non_zero_init: true
+  clear_orientation_heads: false
   decoder:
     n_queries: 16
     n_layers: 3 # number of transformer decoders
@@ -61,8 +61,8 @@ shapenet:
   path: data/ShapeNet
   categories: null #['03001627'] 
   normalize: False
-  gt_train_path: data/output_npz/shapenet/iou_tbr/train.npz
-  gt_val_path: data/output_npz/shapenet/iou_tbr/val.npz
+  gt_train_path: data/output_npz/shapenet/iou_tb/train.npz
+  gt_val_path: data/output_npz/shapenet/iou_tb/val.npz
   filter:
     metric: iou
     threshold: 0.85
@@ -92,11 +92,11 @@ scheduler:
 loss:
   type: geom
   w_geometric: 10.0
-  w_geometric_f: 10.0
+  w_geometric_f: 0.0
   w_exist: 1.0
 
   c_geometric: 10.0 
-  c_z_align: 1.0
+  c_z_align: 0.0
   c_exist: 1.0
 
   n_samples_cost: 64

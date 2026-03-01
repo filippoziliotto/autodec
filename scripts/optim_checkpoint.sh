@@ -7,9 +7,9 @@ python -m superdec.evaluate.to_npz --config-path="../../configs/optim_shapenet" 
   "checkpoint_file=$CKPT_FILE" \
   "output_dir=data/output_npz/$CKPT_FOLDER"
 
+  # "optimization.reorient=true" \
 python -m superoptim.batch_evaluate \
   "type=iou" \
   "optimization.tapering=true" \
   "optimization.bending=true" \
-  "optimization.reorient=true" \
   "+source_folder=$CKPT_FOLDER"

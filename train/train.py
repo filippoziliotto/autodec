@@ -32,10 +32,18 @@ def main(cfg: DictConfig):
 
     run = None
     if cfg.use_wandb and wandb is not None and is_main_process():
-        run = wandb.init(
-            project=cfg.wandb.project,
-            name=cfg.run_name
-        )
+        if hasattr(cfg, 'run_id'):
+            run = wandb.init(
+                project=cfg.wandb.project,
+                name=cfg.run_name,
+                id=cfg.run_id,
+                resume='must'
+            )
+        else:
+            run = wandb.init(
+                project=cfg.wandb.project,
+                name=cfg.run_name
+            )
 
     model = build_model(cfg).to(device)
     

@@ -3,19 +3,18 @@ CKPT_FOLDER=shapenet_iou_051
 CKPT_FILE=epoch_1000.pt
 
 python -m superdec.evaluate.to_npz --config-path="../../$CONFIG_FOLDER" \
+  "dataloader.split=test" \
   "checkpoints_folder=checkpoints/$CKPT_FOLDER" \
   "checkpoint_file=$CKPT_FILE" \
   "output_dir=data/output_npz/$CKPT_FOLDER"
+
 python -m superoptim.batch_evaluate --config-path="../$CONFIG_FOLDER" \
   --config-name="batch_optim" \
+  "type=none" \
+  "shapenet.split=test" \
   "+source_folder=$CKPT_FOLDER"
 
-python -m superdec.evaluate.to_npz --config-path="../../$CONFIG_FOLDER" \
-  "dataloader.split=val" \
-  "checkpoints_folder=checkpoints/$CKPT_FOLDER" \
-  "checkpoint_file=$CKPT_FILE" \
-  "output_dir=data/output_npz/$CKPT_FOLDER"
 python -m superoptim.batch_evaluate --config-path="../$CONFIG_FOLDER" \
   --config-name="batch_optim" \
-  "shapenet.split=val" \
+  "shapenet.split=test" \
   "+source_folder=$CKPT_FOLDER"

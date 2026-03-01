@@ -7,7 +7,7 @@ device: cuda
 optimization:
   tapering: true
   bending: true
-  reorient: true
+  reorient: false
   pruning: false
 
 dataloader:

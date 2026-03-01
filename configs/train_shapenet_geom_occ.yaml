@@ -3,18 +3,18 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_geom_002
+run_name: shapenet_geom_003
 dataset: shapenet
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/normalized/ckpt.pt
+  resume_from: checkpoints/shapenet_iou_051/epoch_1000.pt
   keep_epoch: False
 
 superdec:
   extended: true
   extended_non_zero_init: true
-  clear_orientation_heads: true
+  clear_orientation_heads: false
   decoder:
     n_queries: 16
     n_layers: 3 # number of transformer decoders
@@ -61,23 +61,24 @@ shapenet:
   path: data/ShapeNet
   categories: null #['03001627'] 
   normalize: True # NEEDED TO GENERALIZE TO OCCLUSIONS
-  gt_train_path: data/output_npz/shapenet/iou_tbr/train.npz
-  gt_val_path: data/output_npz/shapenet/iou_tbr/val.npz
+  gt_train_path: data/output_npz/shapenet/iou_tb
+  gt_train_path: data/output_npz/shapenet/iou_tb/train.npz
+  gt_val_path: data/output_npz/shapenet/iou_tb/val.npz
   filter:
     metric: iou
-    threshold: 0.85
+    threshold: 0.90
 
 trainer:
   save_path: checkpoints
   save_every_n_epochs: 100
   num_epochs: 1000
   batch_size: 32
-  num_workers: 8
+  num_workers: 16 # augmentations are slow
   evaluate_every_n_epochs: 10
   augmentations: True
   occlusions: True 
 optimizer:
-  lr: 4e-4 #1e-4 #1e-4   0.001
+  lr: 3e-4 #1e-4 #1e-4   0.001
   weight_decay: 0 # default
   betas: [0.9, 0.999] # default
   enable_scheduler: True # True
@@ -92,10 +93,11 @@ scheduler:
 loss:
   type: geom
   w_geometric: 10.0
-  w_geometric_f: 15.0
+  w_geometric_f: 0.0
   w_exist: 1.0
 
   c_geometric: 10.0 
+  c_z_align: 0.0
   c_exist: 1.0
 
   n_samples_cost: 64
