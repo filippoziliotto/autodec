@@ -32,8 +32,8 @@ class SuperDecHead(nn.Module):
             
             if extended_non_zero_init:            
                 # Initialize tapering and bending heads with small non-zero values
-                nn.init.normal_(self.tapering_head.weight, mean=0.0, std=1e-3)
-                nn.init.normal_(self.tapering_head.bias, mean=0.0, std=1e-3)
+                nn.init.normal_(self.tapering_head.weight, mean=0.0, std=1e-4)
+                nn.init.normal_(self.tapering_head.bias, mean=0.0, std=1e-4)
                 nn.init.normal_(self.bending_a_head.weight, mean=0.0, std=1e-3)
                 nn.init.normal_(self.bending_a_head.bias, mean=0.0, std=1e-3)
                 nn.init.normal_(self.bending_k_head.weight, mean=0.0, std=1e-3)
