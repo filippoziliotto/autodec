@@ -52,6 +52,8 @@ class BatchSuperQMulti(nn.Module):
         exp_list = []
         rot_list = []
         trans_list = []
+        tapering_list = []
+        bending_list = []
         self.masks = [] 
 
         self.points = torch.zeros(B, self.M_points, 3, device=device)
@@ -66,6 +68,8 @@ class BatchSuperQMulti(nn.Module):
             e = torch.tensor(pred_handler.exponents[idx], dtype=torch.float, device=device).reshape(-1, 2)
             r = torch.tensor(pred_handler.rotation[idx], dtype=torch.float, device=device).reshape(-1, 3, 3)
             t = torch.tensor(pred_handler.translation[idx], dtype=torch.float, device=device).reshape(-1, 3)
+            tap = torch.tensor(pred_handler.tapering[idx], dtype=torch.float, device=device).reshape(-1, 2)
+            ben = torch.tensor(pred_handler.bending[idx], dtype=torch.float, device=device).reshape(-1, 6)
             
             s[~mask.reshape(-1)] = 1.0 
             scale_list.append(torch.log(torch.clamp(s - self.minS, min=1e-6)))
@@ -73,6 +77,24 @@ class BatchSuperQMulti(nn.Module):
             exp_list.append(torch.logit((e - self.minE) / (self.maxE - self.minE)))
             rot_list.append(mat2quat(r))
             trans_list.append(t)
+            
+            if torch.count_nonzero(tap) == 0:
+                raw_tap = torch.full_like(tap, 1e-4)
+            else:
+                tap = torch.clamp(tap, -0.9999, 0.9999)
+                raw_tap = torch.atanh(tap)
+            tapering_list.append(raw_tap)
+            
+            if torch.count_nonzero(ben) == 0:
+                raw_ben = torch.full_like(ben, 1e-3)
+                raw_ben[..., 0::2] = torch.logit(raw_ben[..., 0::2])
+            else:
+                tau = 0.01
+                max_scale = tau * torch.logsumexp(s / tau, dim=-1, keepdim=True)
+                raw_ben = torch.empty_like(ben)
+                raw_ben[..., 0::2] = torch.logit(torch.clamp((ben[..., 0::2] * max_scale) / 0.95, 1e-6, 1 - 1e-6))
+                raw_ben[..., 1::2] = torch.logit(torch.clamp(ben[..., 1::2] / (2 * torch.pi), 1e-6, 1 - 1e-6))
+            bending_list.append(raw_ben)
             
             # --- Points ---
             try:
@@ -109,10 +131,8 @@ class BatchSuperQMulti(nn.Module):
         self.raw_exponents = nn.Parameter(torch.stack(exp_list)) # (B, N, 2)
         self.raw_rotation = nn.Parameter(torch.stack(rot_list)) # (B, N, 4)
         self.translation = nn.Parameter(torch.stack(trans_list)) # (B, N, 3)
-        self.raw_tapering = nn.Parameter(torch.full((B, self.N_max, 2), 1e-4, dtype=torch.float, device=device))
-        raw_bending = torch.full((B, self.N_max, 6), 1e-3, dtype=torch.float, device=device)
-        raw_bending[..., 0::2] = torch.logit(raw_bending[..., 0::2])
-        self.raw_bending = nn.Parameter(raw_bending) # (B, N, 6)
+        self.raw_tapering = nn.Parameter(torch.stack(tapering_list)) # (B, N, 2)
+        self.raw_bending = nn.Parameter(torch.stack(bending_list)) # (B, N, 6)
         self.normalize()
         if self.enable_reorient:
             self.reorient()
