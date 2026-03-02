@@ -18,62 +18,13 @@ import matplotlib.pyplot as plt
 from .batch_superq import BatchSuperQMulti
 from ..utils import plot_pred_handler
 
-def visualize_handler(server, superq, sdf_values, plot = False):
-    # Expect batched tensors from BatchSuperQMulti; use batch 0
-    sdf_values = sdf_values.detach().cpu()
-
+def visualize_handler(server, superq, plot = False):
     pred_handler, meshes = superq.update_handler(denormalize=False)
     if plot:
         plot_pred_handler(pred_handler, superq.truncation)
 
     mesh = meshes[0]
     server.scene.add_mesh_trimesh("superquadrics", mesh=mesh, visible=True)
-
-    M_ps = superq.M_points_surf
-    points = superq.points[0].detach().cpu().numpy()
-    cmap = plt.get_cmap('RdBu')
-    norm = plt.Normalize(vmin=-superq.truncation, vmax=superq.truncation)
-    sdf_arr = sdf_values[0].numpy()
-    sdf_colors = cmap(norm(sdf_arr))[:, :3]
-    server.scene.add_point_cloud(
-        name="/sdf_pointcloud",
-        points=points[-M_ps:],
-        colors=sdf_colors[-M_ps:],
-        point_size=0.005,
-        visible=False,
-    )
-
-    server.scene.add_point_cloud(
-        name="/sdf_iou_points",
-        points=points[:-M_ps],
-        colors=sdf_colors[:-M_ps],
-        point_size=0.005,
-        visible=False,
-    )
-
-    # Add ground-truth occupied IOU points (green)
-    gt_occ = superq.occupancies[0].detach().cpu().numpy().astype(bool)
-    if gt_occ.any():
-        iou_occ_points = points[:-M_ps][gt_occ]
-        green_colors = np.tile(np.array([0.0, 1.0, 0.0]), (iou_occ_points.shape[0], 1))
-        server.scene.add_point_cloud(
-            name="/iou_occupied_points",
-            points=iou_occ_points,
-            colors=green_colors,
-            point_size=0.005,
-            visible=True,
-        )
-
-    gt_occ = superq.occupancies[0].detach().cpu().numpy().astype(bool)
-    pred_occ = sdf_arr < 0
-    mismatch_mask = gt_occ != pred_occ[:-M_ps]
-    if mismatch_mask.any():
-        server.scene.add_point_cloud(
-            name="/mismatch_points",
-            points=points[:-M_ps][mismatch_mask],
-            colors=sdf_colors[:-M_ps][mismatch_mask],
-            point_size=0.01,
-        )
 
 def main():
     if len(sys.argv) > 1:
@@ -121,8 +72,6 @@ def main():
         visible=False,
     )
     
-    
-
     # torch.autograd.set_detect_anomaly(True)
     num_epochs = 1_000
     pbar = tqdm(range(num_epochs), desc="Fitting Superquadrics")
@@ -131,7 +80,6 @@ def main():
     for epoch in pbar:
         optimizer.zero_grad()
         forward_out = superq.forward()
-        sdf_vals = forward_out.get('sdfs')
 
         # Use shared loss computation (per-batch)
         loss, losses = superq.compute_losses(forward_out)
@@ -153,21 +101,16 @@ def main():
                     "raw_scale": superq.raw_scale.clone(),
                     "raw_exponents": superq.raw_exponents.clone(),
                     "raw_rotation": superq.raw_rotation.clone(),
-                    "raw_tapering": superq.raw_tapering.clone(),
-                    "raw_bending": superq.raw_bending.clone(),
                     "translation": superq.translation.clone(),
-                    "iou": losses['iou'][0].item(),
                     "epoch": epoch,
                 }
 
         if epoch % 50 == 0:
-            visualize_handler(server, superq, sdf_vals)
+            visualize_handler(server, superq)
         
         pbar.set_postfix({
-            "IoU": f"{losses['iou'][0].item():.2f}",
-            "Sdf": f"{losses['sdf'][0].item():.4f}",
-            "Bbox": f"{losses['bbox'][0].item():.4f}",
-            "Over": f"{losses['overlap'][0].item():.4f}",
+            "Cub": f"{losses['cuboid'][0].item():.4f}",
+            "CD": f"{losses['cd'][0].item():.4f}",
             "Loss": f"{loss.item():.4f}"
         })
 
@@ -177,14 +120,8 @@ def main():
                 superq.raw_scale.copy_(best_params["raw_scale"])
                 superq.raw_exponents.copy_(best_params["raw_exponents"])
                 superq.raw_rotation.copy_(best_params["raw_rotation"])
-                superq.raw_tapering.copy_(best_params["raw_tapering"])
-                superq.raw_bending.copy_(best_params["raw_bending"])
                 superq.translation.copy_(best_params["translation"])
-    forward_out = superq.forward()
-    sdf_vals = forward_out.get('sdfs')
-    visualize_handler(server, superq, sdf_vals, plot=True)
-    print(best_params["iou"])
-    print(best_params["epoch"])
+    visualize_handler(server, superq, plot=True)
 
     while True:
         time.sleep(10.0)

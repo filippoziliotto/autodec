@@ -53,8 +53,8 @@ def main():
     superq = BatchSuperQMulti(
         pred_handler=pred_handler,
         indices=[0],
-        # ply_paths=[f"data/ShapeNet/04379243/{pred_handler.names[0]}/pointcloud.npz"],
-        ply_paths=[f"data/ABO/processed-complete/{pred_handler.names[0]}/pointcloud.npz"],
+        ply_paths=[f"data/ShapeNet/04379243/{pred_handler.names[0]}/pointcloud.npz"],
+        # ply_paths=[f"data/ABO/processed-complete/{pred_handler.names[0]}/pointcloud.npz"],
     )
     param_groups = superq.get_param_groups()
     optimizer = torch.optim.Adam(param_groups)
@@ -74,7 +74,8 @@ def main():
     server.scene.add_mesh_trimesh("original_superquadrics", mesh=orig_mesh, visible=False)
 
     # Segmented pointcloud for batch 0
-    points = pred_handler.pc[superq.indices[0]]
+    points = pred_handler.pc[superq.indices[0]] / superq.normalization_scale.cpu().numpy()
+    points -= superq.normalization_translation.cpu().numpy()
     assign_matrix = pred_handler.assign_matrix[superq.indices[0]]
     colors = generate_ncolors(assign_matrix.shape[1])
     segmentation = np.argmax(assign_matrix, axis=1)
