@@ -3,12 +3,12 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_geom_003
+run_name: shapenet_geom_022
 dataset: shapenet
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/shapenet_iou_051/epoch_1000.pt
+  resume_from: checkpoints/shapenet_iou_371/epoch_1000.pt
   keep_epoch: False
 
 superdec:
@@ -61,9 +61,8 @@ shapenet:
   path: data/ShapeNet
   categories: null #['03001627'] 
   normalize: True # NEEDED TO GENERALIZE TO OCCLUSIONS
-  gt_train_path: data/output_npz/shapenet/iou_tb
-  gt_train_path: data/output_npz/shapenet/iou_tb/train.npz
-  gt_val_path: data/output_npz/shapenet/iou_tb/val.npz
+  gt_train_path: data/output_npz/shapenet_iou_371/iou_tb/train.npz
+  gt_val_path: data/output_npz/shapenet_iou_371/iou_tb/val.npz
   filter:
     metric: iou
     threshold: 0.90

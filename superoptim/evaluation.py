@@ -159,7 +159,7 @@ def get_outdict(pc_gt, normals_gt, pc_pred, normals_pred):
     )
     chamferL1 = 0.5 * (completeness + accuracy)
     F = [
-        2 * precision[i] * recall[i] / (precision[i] + precision[i] + 0.000001)
+        2 * precision[i] * recall[i] / (precision[i] + recall[i] + 0.000001)
         for i in range(len(precision))
     ]
 

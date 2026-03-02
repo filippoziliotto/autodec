@@ -1,5 +1,5 @@
 CONFIG_FOLDER=configs/optim_shapenet
-CKPT_FOLDER=shapenet_iou_051
+CKPT_FOLDER=shapenet_iou_371
 CKPT_FILE=epoch_1000.pt
 
 python -m superdec.evaluate.to_npz --config-path="../../$CONFIG_FOLDER" \
