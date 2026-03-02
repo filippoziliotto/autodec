@@ -107,8 +107,8 @@ def main():
     server.scene.add_mesh_trimesh("original_superquadrics", mesh=orig_mesh, visible=False)
 
     # Segmented pointcloud for batch 0
-    points = pred_handler.pc[superq.indices[0]] / superq.normalization_scale.cpu().numpy()
-    points -= superq.normalization_translation.cpu().numpy()
+    points = pred_handler.pc[superq.indices[0]] - superq.normalization_translation.cpu().numpy()
+    points /= superq.normalization_scale.cpu().numpy()
     assign_matrix = pred_handler.assign_matrix[superq.indices[0]]
     colors = generate_ncolors(assign_matrix.shape[1])
     segmentation = np.argmax(assign_matrix, axis=1)
