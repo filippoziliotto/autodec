@@ -532,3 +532,165 @@ class ABO(ObjectDataset):
 
     def name(self):
         return 'ABO'
+
+
+class ASE(Dataset):
+    def __init__(self, split: str, cfg):
+        super().__init__()
+        import trimesh
+        import ast
+        self.split = split
+        self.instances_path = cfg.ase.instances_path
+        self.csv_path = cfg.ase.csv_path
+        self.num_scenes = cfg.ase.get('num_scenes', None)
+        self.abo_path = cfg.ase.abo_path
+        
+        self.z_up = cfg.ase.get('z_up', False)
+        self.normalize = getattr(cfg.ase, 'normalize', False)
+        
+        df = pd.read_csv(self.csv_path, sep=';')
+        
+        # Load scenes up to num_scenes
+        scenes = sorted([int(d) for d in os.listdir(self.instances_path) if d.isdigit()])
+        if self.num_scenes is not None:
+            scenes = scenes[:self.num_scenes]
+            
+        self.models = []
+        for scene_id in scenes:
+            scene_dir = os.path.join(self.instances_path, str(scene_id))
+            if not os.path.isdir(scene_dir):
+                continue
+            
+            # Find instances in this scene directory
+            ply_files = sorted([f for f in os.listdir(scene_dir) if f.startswith('instance_') and f.endswith('.ply')])
+            for ply_file in ply_files:
+                instance_id = int(ply_file.split('_')[1].split('.')[0])
+                
+                # Find matching row in CSV
+                row = df[(df['scene_id'] == scene_id) & (df['instance_id'] == instance_id)]
+                if len(row) > 0:
+                    obj_id = row.iloc[0]['object_id']
+                    if obj_id.startswith('abo/'):
+                        abo_id = obj_id[4:]
+                    else:
+                        abo_id = obj_id
+                    
+                    self.models.append({
+                        'scene_id': scene_id,
+                        'instance_id': instance_id,
+                        'abo_id': abo_id,
+                        'ply_path': os.path.join(scene_dir, ply_file),
+                        'transform': row.iloc[0]['T_world_model']
+                    })
+
+    def __len__(self):
+        return len(self.models)
+        
+    def __getitem__(self, idx):
+        import trimesh
+        import ast
+        
+        model = self.models[idx]
+        model_id = f"{model['scene_id']}_{model['instance_id']}"
+        abo_id = model['abo_id']
+        ply_path = model['ply_path']
+        transform_str = model['transform']
+
+        # Parse transform
+        try:
+            T_world_model = np.array(ast.literal_eval(transform_str), dtype=np.float32)
+        except Exception:
+            T_world_model = np.eye(4, dtype=np.float32)
+
+        # Load instance point cloud
+        try:
+            mesh = trimesh.load(ply_path, process=False)
+            instance_points = np.array(mesh.vertices, dtype=np.float32)
+            try:
+                instance_normals = np.array(mesh.vertex_normals, dtype=np.float32)
+            except Exception:
+                instance_normals = np.zeros_like(instance_points)
+        except Exception as e:
+            print(f"Failed to load ply {ply_path}: {e}")
+            instance_points = np.zeros((4096, 3), dtype=np.float32)
+            instance_normals = np.zeros((4096, 3), dtype=np.float32)
+        
+        # Load ABO gt pointcloud/occupancy
+        abo_path = os.path.join(self.abo_path, abo_id)
+        
+        try:
+            pc_data = np.load(os.path.join(abo_path, "pointcloud.npz"))
+            abo_points = pc_data['points']
+            abo_normals = pc_data['normals']
+        except Exception as e:
+            print(f"Failed to load ABO pointcloud {abo_id}: {e}")
+
+        try:
+            points_iou_path = os.path.join(abo_path, "points.npz")
+            points_dict = np.load(points_iou_path)
+            points_iou = points_dict['points']
+            occ_tgt = points_dict['occupancies']
+            if np.issubdtype(occ_tgt.dtype, np.uint8):
+                occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
+        except Exception as e:
+            print(f"Failed to load ABO occupancy {abo_id}: {e}")
+
+        # Transform ABO points and occupancies to world coordinate
+        ones_iou = np.ones((points_iou.shape[0], 1), dtype=np.float32)
+        homo_points_iou = np.hstack([points_iou, ones_iou])
+        points_iou_world = (T_world_model @ homo_points_iou.T).T[:, :3]
+        
+        ones_abo = np.ones((abo_points.shape[0], 1), dtype=np.float32)
+        homo_abo_points = np.hstack([abo_points, ones_abo])
+        abo_points_world = (T_world_model @ homo_abo_points.T).T[:, :3]
+        
+        R = T_world_model[:3, :3]
+        abo_normals_world = (R @ abo_normals.T).T
+        
+        if self.normalize:
+            instance_points, translation, scale = normalize_points(instance_points)
+            points_iou_world = (points_iou_world - translation) / scale
+            abo_points_world = (abo_points_world - translation) / scale
+        else:
+            translation = np.zeros(3, dtype=np.float32)
+            scale = 1.0
+
+        n_inst = instance_points.shape[0]
+        if n_inst >= 4096:
+            idxs = np.random.choice(n_inst, 4096, replace=False)
+        else:
+            idxs = np.random.choice(n_inst, 4096)
+        
+        instance_points_4096 = instance_points[idxs]
+        instance_normals_4096 = instance_normals[idxs] if instance_normals is not None and len(instance_normals) > 0 else np.zeros_like(instance_points_4096)
+
+        n_abo = abo_points_world.shape[0]
+        if n_abo >= 4096:
+            idxs_abo = np.random.choice(n_abo, 4096, replace=False)
+        else:
+            idxs_abo = np.random.choice(n_abo, 4096)
+            
+        abo_points_4096 = abo_points_world[idxs_abo]
+        abo_normals_4096 = abo_normals_world[idxs_abo]
+
+        res = {
+            "points": torch.from_numpy(abo_points_4096).float(),          # GT points for evaluating chamfer distance
+            "normals": torch.from_numpy(abo_normals_4096).float(),
+            "instance_points": torch.from_numpy(instance_points_4096).float(),
+            "instance_normals": torch.from_numpy(instance_normals_4096).float(),
+            "translation": torch.from_numpy(translation),
+            "scale": scale,
+            "point_num": abo_points_4096.shape[0],
+            "model_id": model_id,
+            "idx": idx,
+            "points_iou": torch.from_numpy(points_iou_world).float(),
+            "occupancies": torch.from_numpy(occ_tgt).bool(),
+        }
+        
+        # We also put a dummy aug_matrix because ObjectDataset uses it occasionally
+        res["aug_matrix"] = torch.eye(4).float()
+        
+        return res
+        
+    def name(self):
+        return 'ASE'

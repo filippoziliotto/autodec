@@ -12,6 +12,9 @@ def build_dataloader(cfg):
         ds = ShapeNet(split=cfg.shapenet.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'abo':
         ds = ABO(split=cfg.abo.split, cfg=cfg)
+    elif cfg.dataloader.dataset == 'ase':
+        from superdec.data.dataloader import ASE
+        ds = ASE(split=cfg.ase.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'scenes_dataset':
         ds = ScenesDataset(cfg=cfg)
     else:
