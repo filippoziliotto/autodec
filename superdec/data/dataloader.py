@@ -1,6 +1,8 @@
 import os
 from glob import glob
 
+import trimesh
+import ast
 import pandas as pd
 import numpy as np
 import torch
@@ -545,7 +547,6 @@ class ASE(Dataset):
         self.num_scenes = cfg.ase.get('num_scenes', None)
         self.abo_path = cfg.ase.abo_path
         
-        self.z_up = cfg.ase.get('z_up', False)
         self.normalize = getattr(cfg.ase, 'normalize', False)
         
         df = pd.read_csv(self.csv_path, sep=';')
@@ -574,6 +575,9 @@ class ASE(Dataset):
                         abo_id = obj_id[4:]
                     else:
                         abo_id = obj_id
+
+                    if not os.path.isdir('data/ABO/processed-complete/' + abo_id):
+                        continue
                     
                     self.models.append({
                         'scene_id': scene_id,
@@ -586,45 +590,50 @@ class ASE(Dataset):
     def __len__(self):
         return len(self.models)
         
-    def __getitem__(self, idx):
-        import trimesh
-        import ast
-        
+    def __getitem__(self, idx):        
         model = self.models[idx]
         model_id = f"{model['scene_id']}_{model['instance_id']}"
         abo_id = model['abo_id']
         ply_path = model['ply_path']
         transform_str = model['transform']
-
-        # Parse transform
-        try:
-            T_world_model = np.array(ast.literal_eval(transform_str), dtype=np.float32)
-        except Exception:
-            T_world_model = np.eye(4, dtype=np.float32)
+        T_world_model = np.array(ast.literal_eval(transform_str), dtype=np.float32)
 
         # Load instance point cloud
         try:
             mesh = trimesh.load(ply_path, process=False)
             instance_points = np.array(mesh.vertices, dtype=np.float32)
-            try:
-                instance_normals = np.array(mesh.vertex_normals, dtype=np.float32)
-            except Exception:
-                instance_normals = np.zeros_like(instance_points)
         except Exception as e:
             print(f"Failed to load ply {ply_path}: {e}")
-            instance_points = np.zeros((4096, 3), dtype=np.float32)
-            instance_normals = np.zeros((4096, 3), dtype=np.float32)
-        
+            exit()
+
         # Load ABO gt pointcloud/occupancy
         abo_path = os.path.join(self.abo_path, abo_id)
-        
         try:
-            pc_data = np.load(os.path.join(abo_path, "pointcloud.npz"))
+            # as this pointcloud will be used only for eval, we load the FPS
+            pc_data = np.load(os.path.join(abo_path, "pointcloud_4096.npz"))
             abo_points = pc_data['points']
-            abo_normals = pc_data['normals']
+            assert(abo_points.shape[0] == 4096)
         except Exception as e:
             print(f"Failed to load ABO pointcloud {abo_id}: {e}")
+            exit()
 
+        # Transform instance points to ABO coordinates (apply inverse rotation, translation and scaling)
+        abo_points_center = (np.max(abo_points, axis=0) + np.min(abo_points, axis=0))/2
+        abo_points_center[[1, 2]] = abo_points_center[[2, 1]]
+        R_world_model = T_world_model[:3, :3]
+        t_world_model = T_world_model[:3, 3]
+        R_inv = np.linalg.inv(R_world_model)
+        instance_points += abo_points_center
+        instance_points -= t_world_model
+        instance_points = (R_inv @ instance_points.T).T
+
+        yup_to_zup = np.array([
+            [1,  0, 0],
+            [0,  0, -1],
+            [0,  1, 0],
+        ], dtype=np.float64)
+        instance_points = (np.linalg.inv(yup_to_zup) @ instance_points.T).T
+        
         try:
             points_iou_path = os.path.join(abo_path, "points.npz")
             points_dict = np.load(points_iou_path)
@@ -634,56 +643,35 @@ class ASE(Dataset):
                 occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
         except Exception as e:
             print(f"Failed to load ABO occupancy {abo_id}: {e}")
+            exit()
 
-        # Transform ABO points and occupancies to world coordinate
-        ones_iou = np.ones((points_iou.shape[0], 1), dtype=np.float32)
-        homo_points_iou = np.hstack([points_iou, ones_iou])
-        points_iou_world = (T_world_model @ homo_points_iou.T).T[:, :3]
-        
-        ones_abo = np.ones((abo_points.shape[0], 1), dtype=np.float32)
-        homo_abo_points = np.hstack([abo_points, ones_abo])
-        abo_points_world = (T_world_model @ homo_abo_points.T).T[:, :3]
-        
-        R = T_world_model[:3, :3]
-        abo_normals_world = (R @ abo_normals.T).T
-        
         if self.normalize:
             instance_points, translation, scale = normalize_points(instance_points)
-            points_iou_world = (points_iou_world - translation) / scale
-            abo_points_world = (abo_points_world - translation) / scale
+            points_iou = (points_iou - translation) / scale
+            abo_points = (abo_points - translation) / scale
         else:
             translation = np.zeros(3, dtype=np.float32)
             scale = 1.0
 
         n_inst = instance_points.shape[0]
         if n_inst >= 4096:
-            idxs = np.random.choice(n_inst, 4096, replace=False)
+            points_tensor = torch.from_numpy(instance_points)
+            ratio = 4096 / n_inst
+            indices = fps(points_tensor, ratio=ratio)
+            idxs = indices[:4096].numpy()
         else:
             idxs = np.random.choice(n_inst, 4096)
-        
         instance_points_4096 = instance_points[idxs]
-        instance_normals_4096 = instance_normals[idxs] if instance_normals is not None and len(instance_normals) > 0 else np.zeros_like(instance_points_4096)
-
-        n_abo = abo_points_world.shape[0]
-        if n_abo >= 4096:
-            idxs_abo = np.random.choice(n_abo, 4096, replace=False)
-        else:
-            idxs_abo = np.random.choice(n_abo, 4096)
-            
-        abo_points_4096 = abo_points_world[idxs_abo]
-        abo_normals_4096 = abo_normals_world[idxs_abo]
 
         res = {
-            "points": torch.from_numpy(abo_points_4096).float(),          # GT points for evaluating chamfer distance
-            "normals": torch.from_numpy(abo_normals_4096).float(),
-            "instance_points": torch.from_numpy(instance_points_4096).float(),
-            "instance_normals": torch.from_numpy(instance_normals_4096).float(),
+            "points": torch.from_numpy(instance_points_4096).float(),
+            "abo_points": torch.from_numpy(abo_points).float(),          # GT points for evaluating chamfer distance
             "translation": torch.from_numpy(translation),
             "scale": scale,
-            "point_num": abo_points_4096.shape[0],
+            "point_num": instance_points_4096.shape[0],
             "model_id": model_id,
             "idx": idx,
-            "points_iou": torch.from_numpy(points_iou_world).float(),
+            "points_iou": torch.from_numpy(points_iou).float(),
             "occupancies": torch.from_numpy(occ_tgt).bool(),
         }
         

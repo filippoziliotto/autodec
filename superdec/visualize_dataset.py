@@ -7,9 +7,9 @@ import time
 import argparse
 from omegaconf import OmegaConf
 
-from superdec.data.dataloader import ShapeNet, ABO
+from superdec.data.dataloader import ShapeNet, ABO, ASE
 from superdec.utils.predictions_handler_extended import PredictionHandler
-from superoptim.evaluation import get_outdict, eval_mesh, compute_ious_sdf
+from superoptim.evaluation import get_outdict, eval_mesh, compute_ious_sdf_from_handler
 
 def visualize_item(server, item):
     # Clear previous items
@@ -25,6 +25,16 @@ def visualize_item(server, item):
         colors=colors,
         point_size=0.01,
     )
+
+    if 'abo_points' in item:
+        abo_points = item['abo_points'].numpy()
+        colors = np.tile(np.array([1, 0.5, 0.5]), (abo_points.shape[0], 1))
+        server.scene.add_point_cloud(
+            name="/pointcloud_abo",
+            points=abo_points,
+            colors=colors,
+            point_size=0.01,
+        )
 
     if 'points_iou' in item:
         iou_occ_points = np.array(item['points_iou'][item['occupancies'] > 0])
@@ -67,8 +77,20 @@ def visualize_item(server, item):
         })
 
         if 'points_iou' in item:
-            batch_ious = compute_ious_sdf(handler, [0], item['points_iou'].unsqueeze(0), item['occupancies'].unsqueeze(0), device='cpu')
+            batch_ious = compute_ious_sdf_from_handler(handler, [0], item['points_iou'].unsqueeze(0), item['occupancies'].unsqueeze(0), device='cpu')
             print("IoU:", batch_ious)
+
+        if 'gt_sq_points' in item:
+            pts = item['gt_sq_points'][(exist>0.5).squeeze(1)].numpy().reshape(-1, 3)
+            red_colors = np.tile(np.array([1.0, 0.0, 0.0]), (pts.shape[0], 1))
+            server.scene.add_point_cloud(
+                name="/geom_points",
+                points=pts,
+                colors=red_colors,
+                point_size=0.005,
+                visible=True,
+            )
+            
         
         # Get mesh and add to scene
         mesh = handler.get_mesh(0, resolution=30)
@@ -78,7 +100,7 @@ def visualize_item(server, item):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize dataset items")
-    parser.add_argument("--dataset", type=str, default="abo", choices=["shapenet", "abo"], help="Dataset to use")
+    parser.add_argument("--dataset", type=str, default="ase", choices=["shapenet", "abo", "ase"], help="Dataset to use")
     parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"], help="Dataset split")
     parser.add_argument("--index", type=int, default=0, help="Index of the item to visualize")
     args = parser.parse_args()
@@ -86,17 +108,26 @@ def main():
     cfg = OmegaConf.create({
         'shapenet': {
             'path': 'data/ShapeNet',
+            'categories': None,
             'gt_train_path': 'data/output_npz/shapenet/shapenet_train_optimized_iou_bend.npz',
-            # 'normalize': True,
+            'normalize': True,
             'load_occupancy': True,
             # 'use_fps': True,
         },
         'abo': {
             'path': 'data/ABO/processed-complete',
             'gt_train_path': 'data/output_npz/abo/abo_train_optimized_iou_bend.npz',
-            # 'normalize': True,
+            'normalize': True,
             'load_occupancy': True,
+            'geometric_samples': 256,
             # 'use_fps': True,
+        },
+        'ase': {
+            'instances_path': 'data/ase/scenes',
+            'csv_path': 'data/ase/scenes/object_info_new.csv',
+            'abo_path': 'data/ABO/processed-complete',
+            'load_occupancy': True,
+            'normalize': True,
         },
         'trainer': { 
             'augmentations': True,
@@ -109,6 +140,8 @@ def main():
         dataset = ShapeNet(args.split, cfg)
     elif args.dataset == "abo":
         dataset = ABO(args.split, cfg)
+    elif args.dataset == "ase":
+        dataset = ASE(args.split, cfg)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
