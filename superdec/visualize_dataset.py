@@ -127,7 +127,7 @@ def main():
             'csv_path': 'data/ase/scenes/object_info_new.csv',
             'abo_path': 'data/ABO/processed-complete',
             'load_occupancy': True,
-            'normalize': True,
+            # 'normalize': True,
         },
         'trainer': { 
             'augmentations': True,
@@ -141,7 +141,7 @@ def main():
     elif args.dataset == "abo":
         dataset = ABO(args.split, cfg)
     elif args.dataset == "ase":
-        dataset = ASE(args.split, cfg)
+        dataset = ASE(None, cfg)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 

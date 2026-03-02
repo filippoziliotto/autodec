@@ -581,7 +581,8 @@ class ASE(Dataset):
                         'instance_id': instance_id,
                         'abo_id': abo_id,
                         'ply_path': os.path.join(scene_dir, ply_file),
-                        'transform': row.iloc[0]['T_world_model']
+                        'transform': row.iloc[0]['T_world_model'],
+                        'obb_size': row.iloc[0]['obb_size']
                     })
 
     def __len__(self):
@@ -593,7 +594,9 @@ class ASE(Dataset):
         abo_id = model['abo_id']
         ply_path = model['ply_path']
         transform_str = model['transform']
+        obb_size_str = model['obb_size']
         T_world_model = np.array(ast.literal_eval(transform_str), dtype=np.float32)
+        obb_size = np.array(ast.literal_eval(obb_size_str), dtype=np.float32)
 
         # Load instance point cloud
         try:
@@ -648,6 +651,11 @@ class ASE(Dataset):
         except Exception as e:
             print(f"Failed to load ABO occupancy {abo_id}: {e}")
             exit()
+
+        extent = (np.max(abo_points, axis=0) - np.min(abo_points, axis=0))
+        scale = obb_size/extent
+        points_iou *= scale
+        abo_points *= scale
 
         if self.normalize:
             # Note: normalize_points only translates and scales points, not normals

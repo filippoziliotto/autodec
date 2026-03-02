@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from geomloss import SamplesLoss
 
 from superdec.loss.sampler import EqualDistanceSamplerSQ
 from superdec.utils.transforms import transform_to_primitive_frame, quat2mat, mat2quat
