@@ -653,6 +653,7 @@ class ASE(Dataset):
             exit()
 
         extent = (np.max(abo_points, axis=0) - np.min(abo_points, axis=0))
+        obb_size[[1,2]] = obb_size[[2,1]]
         scale = obb_size/extent
         points_iou *= scale
         abo_points *= scale
