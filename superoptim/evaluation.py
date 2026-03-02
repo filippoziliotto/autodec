@@ -3,7 +3,7 @@ import torch.nn as nn
 import trimesh
 import numpy as np
 from scipy.spatial import KDTree
-from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO
+from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO, ASE
 from torch.utils.data import DataLoader, Subset
 from superdec.utils.safe_operations import safe_pow, safe_mul
 
@@ -13,8 +13,7 @@ def build_dataloader(cfg):
     elif cfg.dataloader.dataset == 'abo':
         ds = ABO(split=cfg.abo.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'ase':
-        from superdec.data.dataloader import ASE
-        ds = ASE(split=cfg.ase.split, cfg=cfg)
+        ds = ASE(num_scenes=cfg.ase.num_scenes, cfg=cfg)
     elif cfg.dataloader.dataset == 'scenes_dataset':
         ds = ScenesDataset(cfg=cfg)
     else:
@@ -245,18 +244,6 @@ def sdfs_from_outdict(outdict, points, device='cuda'):
     y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
     z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
 
-    kx = taper[..., 0].unsqueeze(-1)
-    ky = taper[..., 1].unsqueeze(-1)
-
-    fx = safe_mul(kx / sz, z) + 1
-    fy = safe_mul(ky / sz, z) + 1
-
-    fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
-    fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
-
-    x = x / fx
-    y = y / fy
-
     # Bending stored as [kb_z, alpha_z, kb_x, alpha_x, kb_y, alpha_y]
     kb = bending[..., 0::2]
     alpha = bending[..., 1::2]
@@ -292,6 +279,19 @@ def sdfs_from_outdict(outdict, points, device='cuda'):
     x, y, z = inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
     x, y, z = inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
     x, y, z = inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
+
+    # Tapering
+    kx = taper[..., 0].unsqueeze(-1)
+    ky = taper[..., 1].unsqueeze(-1)
+
+    fx = safe_mul(kx / sz, z) + 1
+    fy = safe_mul(ky / sz, z) + 1
+
+    fx = torch.where(fx > 0, 1.0, -1.0) * torch.clamp(torch.abs(fx), min=eps)
+    fy = torch.where(fy > 0, 1.0, -1.0) * torch.clamp(torch.abs(fy), min=eps)
+
+    x = x / fx
+    y = y / fy
 
     r0 = torch.sqrt(x**2 + y**2 + z**2)
 

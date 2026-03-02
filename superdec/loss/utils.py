@@ -136,15 +136,6 @@ def parametric_to_points_extended(
     y = ((y > 0).float() * 2 - 1) * torch.max(torch.abs(y), y.new_tensor(1e-6))
     z = ((z > 0).float() * 2 - 1) * torch.max(torch.abs(z), z.new_tensor(1e-6))
 
-    # --- Apply Tapering ---
-    kx = tapering[:, :, 0].unsqueeze(-1)
-    ky = tapering[:, :, 1].unsqueeze(-1)
-    z_norm = z / a3
-    fx = kx * z_norm + 1.0
-    fy = ky * z_norm + 1.0
-    x = x * fx
-    y = y * fy
-
     # --- Apply Bending ---
     x, y, z = apply_bending_axis_pt(
         x, y, z, 
@@ -164,6 +155,15 @@ def parametric_to_points_extended(
         bending_a[:, :, 0].unsqueeze(-1), 
         'z'
     )
+    
+    # --- Apply Tapering ---
+    kx = tapering[:, :, 0].unsqueeze(-1)
+    ky = tapering[:, :, 1].unsqueeze(-1)
+    z_norm = z / a3
+    fx = kx * z_norm + 1.0
+    fy = ky * z_norm + 1.0
+    x = x * fx
+    y = y * fy
 
     pts = torch.stack([x, y, z], -1)
     pts_world = torch.matmul(

@@ -23,7 +23,7 @@ def main(cfg: DictConfig):
     module_type = 'none'
     dataset = cfg.dataloader.get('dataset', 'shapenet')
     source_folder = cfg.get('source_folder', dataset)
-    split = cfg.get(dataset).get('split', 'test')
+    split = cfg.get(dataset)['num_scenes']
     small = cfg.get('small', False)
 
     print(f"Evaluating {module_type} on {dataset} {split}...")
@@ -69,8 +69,6 @@ def main(cfg: DictConfig):
     print(f"Loaded {len(valid_indices)} objects from all categories out of {pred_handler.scale.shape[0]}.")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    num_epochs = cfg.get('num_epochs', 1000)
-    if module_type == "none": num_epochs = 0
     
     # Store aggregated metrics
     aggregated_metrics = {
@@ -90,8 +88,8 @@ def main(cfg: DictConfig):
         batch_indices = batch['idx']
 
         # Move tensors to device
-        points = batch['points'].to(device)
-        normals = batch['normals'].to(device)
+        points = batch['abo_points'].to(device)
+        normals = batch['abo_normals'].to(device)
         points_iou = batch['points_iou'].to(device)
         occupancies = batch['occupancies'].to(device)
         
@@ -99,12 +97,6 @@ def main(cfg: DictConfig):
             pred_handler=pred_handler,
             indices=batch_indices,
             device=device,
-            external_data={
-                'points': points,
-                'normals': normals,
-                'points_iou': points_iou,
-                'occupancies': occupancies
-            },
             cfg=cfg.optimization
         )
         
@@ -225,7 +217,7 @@ def main(cfg: DictConfig):
         print("No valid objects evaluated.")
 
 if __name__ == "__main__":
-    @hydra.main(version_base=None, config_path="../configs", config_name="batch_eval")
+    @hydra.main(version_base=None, config_path="../configs", config_name="batch_eval_occ")
     def run_main(cfg: DictConfig):
         torch.manual_seed(0)
         np.random.seed(0)

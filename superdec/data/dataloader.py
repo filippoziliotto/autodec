@@ -3,6 +3,7 @@ from glob import glob
 
 import trimesh
 import ast
+from scipy.spatial import KDTree
 import pandas as pd
 import numpy as np
 import torch
@@ -537,14 +538,11 @@ class ABO(ObjectDataset):
 
 
 class ASE(Dataset):
-    def __init__(self, split: str, cfg):
+    def __init__(self, num_scenes, cfg):
         super().__init__()
-        import trimesh
-        import ast
-        self.split = split
+        self.num_scenes = num_scenes
         self.instances_path = cfg.ase.instances_path
         self.csv_path = cfg.ase.csv_path
-        self.num_scenes = cfg.ase.get('num_scenes', None)
         self.abo_path = cfg.ase.abo_path
         
         self.normalize = getattr(cfg.ase, 'normalize', False)
@@ -574,12 +572,11 @@ class ASE(Dataset):
                     if obj_id.startswith('abo/'):
                         abo_id = obj_id[4:]
                     else:
-                        abo_id = obj_id
-
-                    if not os.path.isdir('data/ABO/processed-complete/' + abo_id):
                         continue
                     
+                    model_id = f"{scene_id}_{instance_id}"
                     self.models.append({
+                        'model_id': model_id,
                         'scene_id': scene_id,
                         'instance_id': instance_id,
                         'abo_id': abo_id,
@@ -592,7 +589,7 @@ class ASE(Dataset):
         
     def __getitem__(self, idx):        
         model = self.models[idx]
-        model_id = f"{model['scene_id']}_{model['instance_id']}"
+        model_id = model['model_id']
         abo_id = model['abo_id']
         ply_path = model['ply_path']
         transform_str = model['transform']
@@ -612,6 +609,7 @@ class ASE(Dataset):
             # as this pointcloud will be used only for eval, we load the FPS
             pc_data = np.load(os.path.join(abo_path, "pointcloud_4096.npz"))
             abo_points = pc_data['points']
+            abo_normals = pc_data['normals']
             assert(abo_points.shape[0] == 4096)
         except Exception as e:
             print(f"Failed to load ABO pointcloud {abo_id}: {e}")
@@ -632,8 +630,14 @@ class ASE(Dataset):
             [0,  0, -1],
             [0,  1, 0],
         ], dtype=np.float64)
-        instance_points = (np.linalg.inv(yup_to_zup) @ instance_points.T).T
+        yup_to_zup_inv = np.linalg.inv(yup_to_zup)
+        instance_points = (yup_to_zup_inv @ instance_points.T).T
         
+        # Assign normals to instance_points from the closest point in abo_points
+        kdtree = KDTree(abo_points)
+        _, idxs_closest = kdtree.query(instance_points)
+        instance_normals = abo_normals[idxs_closest]
+
         try:
             points_iou_path = os.path.join(abo_path, "points.npz")
             points_dict = np.load(points_iou_path)
@@ -646,6 +650,7 @@ class ASE(Dataset):
             exit()
 
         if self.normalize:
+            # Note: normalize_points only translates and scales points, not normals
             instance_points, translation, scale = normalize_points(instance_points)
             points_iou = (points_iou - translation) / scale
             abo_points = (abo_points - translation) / scale
@@ -655,17 +660,21 @@ class ASE(Dataset):
 
         n_inst = instance_points.shape[0]
         if n_inst >= 4096:
-            points_tensor = torch.from_numpy(instance_points)
-            ratio = 4096 / n_inst
-            indices = fps(points_tensor, ratio=ratio)
-            idxs = indices[:4096].numpy()
+            # points_tensor = torch.from_numpy(instance_points)
+            # ratio = 4096 / n_inst
+            # indices = fps(points_tensor, ratio=ratio)
+            # idxs = indices[:4096].numpy()
+            idxs = np.random.choice(n_inst, 4096, replace=False)
         else:
             idxs = np.random.choice(n_inst, 4096)
         instance_points_4096 = instance_points[idxs]
+        instance_normals_4096 = instance_normals[idxs]
 
         res = {
             "points": torch.from_numpy(instance_points_4096).float(),
+            "normals": torch.from_numpy(instance_normals_4096).float(),
             "abo_points": torch.from_numpy(abo_points).float(),          # GT points for evaluating chamfer distance
+            "abo_normals": torch.from_numpy(abo_normals).float(),
             "translation": torch.from_numpy(translation),
             "scale": scale,
             "point_num": instance_points_4096.shape[0],
@@ -675,7 +684,7 @@ class ASE(Dataset):
             "occupancies": torch.from_numpy(occ_tgt).bool(),
         }
         
-        # We also put a dummy aug_matrix because ObjectDataset uses it occasionally
+        # We also put a dummy aug_matrix
         res["aug_matrix"] = torch.eye(4).float()
         
         return res

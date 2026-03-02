@@ -103,17 +103,17 @@ Evaluating iou on shapenet test...
 Loading data/output_npz/shapenet/shapenet_test.npz...
 Will save results to data/output_npz/shapenet/iou/test.npz...
 Loaded 8751 objects from all categories out of 8751.
-Processing batches: 100%|██████████| 35/35 [1:22:51<00:00, 142.04s/it]
+Processing batches: 100%|██████████| 35/35 [1:22:29<00:00, 141.43s/it]
 Saving optimized results to data/output_npz/shapenet/iou/test.npz...
 Saving per-object metrics to data/output_npz/shapenet/iou/test_metrics.csv...
 
 ----- Evaluation Results -----
-          mean_chamfer_l1: 0.014585
-          mean_chamfer_l2: 0.000411
-                 mean_iou: 0.559141
-             mean_f-score: 0.397528
-          mean_f-score-15: 0.637725
-          mean_f-score-20: 0.786554
+          mean_chamfer_l1: 0.014845
+          mean_chamfer_l2: 0.000422
+                 mean_iou: 0.556882
+             mean_f-score: 0.389055
+          mean_f-score-15: 0.629756
+          mean_f-score-20: 0.780638
        avg_num_primitives: 5.793852
 
 

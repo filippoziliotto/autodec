@@ -795,13 +795,14 @@ class IoULoss(BaseLoss):
         loss_dict = {}
         
         # 1. SDF on Surface Points
+        out_dict['scale'] = torch.clamp(out_dict['scale'], min=0.01) # when scale is too low sdf calculations fail
         all_sdfs_surf = sdf_batch(pc, out_dict) #(B, N, M_surf)
         exist_probs = out_dict['exist'].reshape(all_sdfs_surf.shape[0], all_sdfs_surf.shape[1]) # (B, N)
         exist_weights = exist_probs.unsqueeze(-1) # (B, N, 1)
         assign_probs = out_dict['assign_matrix'].transpose(1, 2) #(B, N, M_surf)
         
-        temperature = 1e-2
-        sdfs_surf_trunc = (torch.sigmoid(all_sdfs_surf / temperature) - 0.5) * 2 * self.truncation
+        # Soft truncation using tanh preserves unit gradients near the surface (SDF=0)
+        sdfs_surf_trunc = self.truncation * torch.tanh(all_sdfs_surf / self.truncation)
         relu_sdfs_trunc = torch.abs(torch.nn.LeakyReLU()(sdfs_surf_trunc)) 
         weighted_relu_sdf = (assign_probs * relu_sdfs_trunc).sum(dim=1) #(B, M_surf)
         L_sdf = 16 * weighted_relu_sdf.mean()

@@ -1,0 +1,17 @@
+checkpoints_folder: checkpoints/shapenet_geom_012
+checkpoint_file: epoch_1000.pt
+output_dir: data/output_npz/shapenet_geom_012
+config_file: config.yaml
+device: "cuda"
+dataset: ase
+dataloader:
+  batch_size: 128
+  num_workers: 8
+ase:
+  instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
+  csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
+  abo_path: data/ABO/processed-complete
+  num_scenes: 50
+  normalize: true
+evaluation:
+  resolution: 50 

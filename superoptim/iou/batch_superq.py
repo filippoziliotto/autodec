@@ -308,6 +308,13 @@ class BatchSuperQMulti(nn.Module):
         y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
         z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
         
+        # Apply bending if enabled
+        if self.enable_bending:
+            kb, alpha = self.bending()
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
+
         # Apply tapering if enabled
         if self.enable_tapering:
             kx = self.tapering()[..., 0].unsqueeze(-1)
@@ -321,13 +328,6 @@ class BatchSuperQMulti(nn.Module):
             
             x = x / fx
             y = y / fy
-
-        # Apply bending if enabled
-        if self.enable_bending:
-            kb, alpha = self.bending()
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
 
         r0 = torch.sqrt(x**2 + y**2 + z**2)
         
@@ -391,7 +391,8 @@ class BatchSuperQMulti(nn.Module):
         # SDF Loss on surface points
         temperature = 1e-2
         sdfs_surf = sdfs[:, self.M_points_iou:]
-        sdfs_surf = (torch.sigmoid(sdfs_surf / temperature) - 0.5) * 2 * self.truncation
+        # sdfs_surf = (torch.sigmoid(sdfs_surf / temperature) - 0.5) * 2 * self.truncation
+        sdfs_surf = self.truncation * torch.tanh(sdfs_surf / self.truncation)
         # Lsdf = 8 * torch.mean(torch.abs(sdfs_surf), dim=1) # (B,)
         # Lsdf = 16 * torch.mean(torch.relu(sdfs_surf), dim=1) # (B,)
         Lsdf = 16 * torch.mean(torch.abs(torch.nn.LeakyReLU()(sdfs_surf)), dim=1) # (B,)

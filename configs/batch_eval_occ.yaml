@@ -1,0 +1,21 @@
+# Hydra config for batch evaluation used by superoptim/batch_evaluate_occ.py
+source_folder: normalized
+small: false
+device: cuda
+
+# load bending and tapering
+optimization:
+  tapering: true
+  bending: true
+
+dataloader:
+  dataset: ase
+  batch_size: 256
+  num_workers: 4
+
+ase:
+  instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
+  csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
+  abo_path: data/ABO/processed-complete
+  num_scenes: 50
+  normalize: false

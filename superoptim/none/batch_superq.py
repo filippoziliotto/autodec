@@ -171,6 +171,13 @@ class BatchSuperQMulti(nn.Module):
         y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
         z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
         
+        # Apply bending if enabled
+        if self.enable_bending:
+            kb, alpha = self.bending()
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
+            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
+
         # Apply tapering if enabled
         if self.enable_tapering:
             kx = self.tapering()[..., 0].unsqueeze(-1)
@@ -184,13 +191,6 @@ class BatchSuperQMulti(nn.Module):
             
             x = x / fx
             y = y / fy
-
-        # Apply bending if enabled
-        if self.enable_bending:
-            kb, alpha = self.bending()
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
-            x, y, z = self.inverse_bending_axis(x, y, z, kb[..., 2].unsqueeze(-1), alpha[..., 2].unsqueeze(-1), 'y')
 
         r0 = torch.sqrt(x**2 + y**2 + z**2)
         
