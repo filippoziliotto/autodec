@@ -5,17 +5,15 @@ config_file: config.yaml
 device: "cuda"
 dataset: shapenet
 dataloader:
-  split: test
+  split: train
   batch_size: 128
   num_workers: 4
+trainer:
+  occlusions: True
 shapenet:
   path: "data/ShapeNet"
-  normalize: false
+  normalize: true
   categories: null
-scene:
-  path: data
-  name: scene_example
-  z_up: true
-  gt: true
+  use_fps: true
 evaluation:
   resolution: 50 

@@ -3,7 +3,7 @@ checkpoint_file: epoch_1000.pt
 output_dir: data/output_npz/shapenet_geom_012
 config_file: config.yaml
 device: "cuda"
-dataset: ase
+dataset: ase_object
 dataloader:
   batch_size: 128
   num_workers: 8
@@ -11,7 +11,16 @@ ase:
   instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
   csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
   abo_path: data/ABO/processed-complete
-  num_scenes: 50
+  split: test
   normalize: true
+
+ase_object:
+  instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
+  csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
+  abo_path: data/ABO/processed-complete
+  split: test
+  normalize: true
+  gt_params_path: data/output_npz/abo/iou_tb/train.npz
+
 evaluation:
   resolution: 50 

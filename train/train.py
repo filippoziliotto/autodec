@@ -32,11 +32,11 @@ def main(cfg: DictConfig):
 
     run = None
     if cfg.use_wandb and wandb is not None and is_main_process():
-        if hasattr(cfg, 'run_id'):
+        if hasattr(cfg.checkpoints, 'run_id'):
             run = wandb.init(
                 project=cfg.wandb.project,
                 name=cfg.run_name,
-                id=cfg.run_id,
+                id=cfg.checkpoints.run_id,
                 resume='must'
             )
         else:

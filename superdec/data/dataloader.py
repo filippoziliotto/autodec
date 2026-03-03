@@ -75,11 +75,10 @@ def get_transforms(split: str, cfg):
 def get_occlusion_transforms(split: str, cfg):
     if split != 'train' or 'trainer' not in cfg or not cfg.trainer.occlusions:
         return None
-    
     return Compose([
-        BackFaceCulling(p=0.5),
-        RandomOcclusion(p=0.2),
-        HRPOcclusion(p=0.1), # kind of slow
+        # BackFaceCulling(p=0.5),
+        RandomOcclusion(p=0.25),
+        HRPOcclusion(p=0.25), # kind of slow
     ])
 
 class ScenesDataset(Dataset):
@@ -538,9 +537,14 @@ class ABO(ObjectDataset):
 
 
 class ASE(Dataset):
-    def __init__(self, num_scenes, cfg):
+    SPLIT_SCENES = {
+        'test': 200,
+    }
+
+    def __init__(self, split, cfg):
         super().__init__()
-        self.num_scenes = num_scenes
+        self.split = split
+        self.num_scenes = SPLIT_SCENES[split]
         self.instances_path = cfg.ase.instances_path
         self.csv_path = cfg.ase.csv_path
         self.abo_path = cfg.ase.abo_path
@@ -700,3 +704,298 @@ class ASE(Dataset):
         
     def name(self):
         return 'ASE'
+
+class ASE_Object(Dataset):
+    """Object-wise dataset built from ASE scene observations.
+
+    Groups all scene instances by abo_id, then splits object-wise:
+        test:  first n_test  abo_ids (sorted)
+        train: next  n_train abo_ids
+        val:   the rest
+
+    At each __getitem__ one scene instance for that object is sampled
+    using a per-index seeded RNG (deterministic, DataLoader-worker-safe).
+    The same coordinate transform as ASE is applied to the instance pointcloud.
+    """
+
+    def __init__(self, split: str, cfg):
+        super().__init__()
+        self.split = split
+        self.instances_path = cfg.ase_object.instances_path
+        self.csv_path       = cfg.ase_object.csv_path
+        self.abo_path       = cfg.ase_object.abo_path
+        self.normalize      = getattr(cfg.ase_object, 'normalize', True)
+        self.seed           = getattr(cfg.ase_object, 'seed', 42)
+        self.rng            = np.random.default_rng(self.seed)
+
+        # Build mapping: abo_id -> list of instance dicts (from ALL scenes)
+        self.occlusion_map = self._build_occlusion_map()
+
+        # Object-wise deterministic split (80% train, 10% val, 10% test)
+        # Shuffle with a fixed seed so all splits get a representative mix of object types
+        all_ids = sorted(self.occlusion_map.keys())
+        rng_split = np.random.default_rng(0)
+        rng_split.shuffle(all_ids)
+        n_total = len(all_ids)
+        n_test  = int(n_total * getattr(cfg.ase_object, 'test_frac',  0.1))
+        n_val   = int(n_total * getattr(cfg.ase_object, 'val_frac',   0.1))
+
+        if split == 'test':
+            self.abo_ids = all_ids[:n_test]
+        elif split == 'val':
+            self.abo_ids = all_ids[n_test:n_test + n_val]
+        elif split == 'train':
+            self.abo_ids = all_ids[n_test + n_val:]
+        else:
+            print(f"Unknown split '{split}' for ASE_Object, using all data.")
+            exit()
+
+        print(f"ASE_Object [{split}]: {len(self.abo_ids)} objects, "
+              f"{sum(len(self.occlusion_map[i]) for i in self.abo_ids)} total instances.")
+
+        # GT params (keyed by abo_id)
+        self.gt_data, self.gt_mapping = {}, {}
+        self.gt_params_path = getattr(cfg.ase_object, 'gt_params_path', None)
+        if self.gt_params_path is not None:
+            self._load_gt_params()
+
+        # Filter (only for training)
+        if self.gt_params_path is not None and split == 'train':
+            self.filter_cfg = getattr(cfg.ase_object, 'filter', None)
+            if self.filter_cfg is not None:
+                valid = self._load_filter()
+                if valid is not None:
+                    before = len(self.abo_ids)
+                    self.abo_ids = [i for i in self.abo_ids if i in valid]
+                    print(f"ASE_Object filter: kept {len(self.abo_ids)}/{before} objects.")
+
+    # ------------------------------------------------------------------
+    def _build_occlusion_map(self):
+        """Scan all scenes (excluding ASE test scenes) and group instances by abo_id."""
+        occ_map = {}
+        df = pd.read_csv(self.csv_path, sep=';')
+        all_scenes = sorted([int(d) for d in os.listdir(self.instances_path) if d.isdigit()])
+        # n_test_scenes = ASE.SPLIT_SCENES['test']
+        # all_scenes = all_scenes[n_test_scenes:]  # skip ASE test scenes
+
+        for scene_id in all_scenes:
+            scene_dir = os.path.join(self.instances_path, str(scene_id))
+            if not os.path.isdir(scene_dir):
+                continue
+            ply_files = sorted([f for f in os.listdir(scene_dir)
+                                 if f.startswith('instance_') and f.endswith('.ply')])
+            for ply_file in ply_files:
+                instance_id = int(ply_file.split('_')[1].split('.')[0])
+                row = df[(df['scene_id'] == scene_id) & (df['instance_id'] == instance_id)]
+                if len(row) == 0:
+                    continue
+                obj_id = row.iloc[0]['object_id']
+                if not obj_id.startswith('abo/'):
+                    continue
+                abo_id = obj_id[4:]
+                entry = {
+                    'scene_id':    scene_id,
+                    'instance_id': instance_id,
+                    'ply_path':    os.path.join(scene_dir, ply_file),
+                    'transform':   row.iloc[0]['T_world_model'],
+                    'obb_size':    row.iloc[0]['obb_size'],
+                }
+                occ_map.setdefault(abo_id, []).append(entry)
+
+        return occ_map
+
+    def _load_gt_params(self):
+        if not os.path.exists(self.gt_params_path):
+            print(f"Warning: GT params path {self.gt_params_path} not found.")
+            return
+        try:
+            data = np.load(self.gt_params_path, allow_pickle=True)
+            self.gt_data = {k: data[k] for k in data.files}
+            names = self.gt_data['names']
+            if names.ndim == 0:
+                names = names.item()
+            self.gt_mapping = {str(n): i for i, n in enumerate(names)}
+            print(f"Loaded GT params from {self.gt_params_path} for {len(names)} models.")
+        except Exception as e:
+            print(f"Error loading GT params: {e}")
+            self.gt_data = None
+
+    def _load_filter(self):
+        metrics_path = self.gt_params_path.replace('.npz', '_metrics.csv')
+        if not os.path.exists(metrics_path):
+            print(f"Warning: Metrics path {metrics_path} not found for filtering.")
+            return None
+        try:
+            metric    = self.filter_cfg.get('metric')
+            threshold = float(self.filter_cfg.get('threshold'))
+            operator  = self.filter_cfg.get('operator', '<=' if 'chamfer' in metric.lower() else '>=')
+
+            df = pd.read_csv(metrics_path)
+            if metric not in df.columns:
+                print(f"Warning: Metric {metric} not found in {metrics_path}.")
+                return None
+
+            total = len(df)
+            if operator == '<=':
+                valid_df = df[df[metric] <= threshold]
+            elif operator == '>=':
+                valid_df = df[df[metric] >= threshold]
+            elif operator == '<':
+                valid_df = df[df[metric] < threshold]
+            elif operator == '>':
+                valid_df = df[df[metric] > threshold]
+            else:
+                print(f"Warning: Unknown operator {operator}.")
+                return None
+
+            valid = set(valid_df['name'].astype(str))
+            print(f"ASE_Object gt filter: {total - len(valid)} removed, {len(valid)} remaining "
+                  f"based on {metric} {operator} {threshold}.")
+            return valid
+        except Exception as e:
+            print(f"Error loading filter: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    @property
+    def models(self):
+        """Compatibility shim: returns a list of dicts with 'model_id' for each abo_id."""
+        return [{'model_id': abo_id} for abo_id in self.abo_ids]
+
+    def __len__(self):
+        return len(self.abo_ids)
+
+    def __getitem__(self, idx):
+        abo_id = self.abo_ids[idx]
+
+        # Sample one scene instance using the dataset-level RNG (varies per epoch, reproducible across runs)
+        instances = self.occlusion_map[abo_id]
+        instance = instances[int(self.rng.integers(len(instances)))]
+
+        ply_path      = instance['ply_path']
+        T_world_model = np.array(ast.literal_eval(instance['transform']), dtype=np.float32)
+        obb_size      = np.array(ast.literal_eval(instance['obb_size']),   dtype=np.float32)
+
+        # Load instance point cloud from scene PLY
+        try:
+            mesh = trimesh.load(ply_path, process=False)
+            instance_points = np.array(mesh.vertices, dtype=np.float32)
+        except Exception as e:
+            print(f"Failed to load ply {ply_path}: {e}")
+            exit()
+
+        # Load ABO ground-truth pointcloud
+        abo_dir = os.path.join(self.abo_path, abo_id)
+        try:
+            abo_pc      = np.load(os.path.join(abo_dir, "pointcloud_4096.npz"))
+            abo_points  = abo_pc['points'].astype(np.float32)
+            abo_normals = abo_pc['normals'].astype(np.float32)
+            assert abo_points.shape[0] == 4096
+        except Exception as e:
+            print(f"Failed to load ABO pointcloud {abo_id}: {e}")
+            exit()
+
+        # Transform instance points to ABO coordinates (same as ASE)
+        abo_points_center = (np.max(abo_points, axis=0) + np.min(abo_points, axis=0)) / 2
+        abo_points_center[[1, 2]] = abo_points_center[[2, 1]]
+        R_world_model = T_world_model[:3, :3]
+        t_world_model = T_world_model[:3, 3]
+        R_inv = np.linalg.inv(R_world_model)
+        instance_points += abo_points_center
+        instance_points -= t_world_model
+        instance_points = (R_inv @ instance_points.T).T
+
+        yup_to_zup = np.array([
+            [1,  0, 0],
+            [0,  0, -1],
+            [0,  1, 0],
+        ], dtype=np.float64)
+        yup_to_zup_inv = np.linalg.inv(yup_to_zup)
+        instance_points = (yup_to_zup_inv @ instance_points.T).T
+
+        # Assign normals from closest ABO point
+        kdtree = KDTree(abo_points)
+        _, idxs_closest = kdtree.query(instance_points)
+        normals = abo_normals[idxs_closest]
+
+        # Load occupancy
+        try:
+            pts_dict   = np.load(os.path.join(abo_dir, "points.npz"))
+            points_iou = pts_dict['points'].astype(np.float32)
+            occ_tgt    = pts_dict['occupancies']
+            if np.issubdtype(occ_tgt.dtype, np.uint8):
+                occ_tgt = np.unpackbits(occ_tgt)[:points_iou.shape[0]]
+        except Exception as e:
+            print(f"Failed to load ABO occupancy {abo_id}: {e}")
+            exit()
+
+        # Apply obb_size scaling (same as ASE)
+        extent = np.max(abo_points, axis=0) - np.min(abo_points, axis=0)
+        obb_size[[1, 2]] = obb_size[[2, 1]]
+        size_scale = obb_size / extent
+        points_iou *= size_scale
+        abo_points *= size_scale
+
+        # Subsample to 4096
+        n_pts = instance_points.shape[0]
+        if n_pts >= 4096:
+            sub_idxs = np.random.choice(n_pts, 4096, replace=False)
+        else:
+            sub_idxs = np.random.choice(n_pts, 4096)
+        instance_points = instance_points[sub_idxs]
+        normals         = normals[sub_idxs]
+
+        if self.normalize:
+            instance_points, translation, scale = normalize_points(instance_points)
+            points_iou = (points_iou - translation) / scale
+            abo_points = (abo_points - translation) / scale
+        else:
+            translation = np.zeros(3, dtype=np.float32)
+            scale = 1.0
+
+        res = {
+            "points":      torch.from_numpy(instance_points).float(),
+            "normals":     torch.from_numpy(normals).float(),
+            "abo_points":  torch.from_numpy(abo_points).float(),
+            "abo_normals": torch.from_numpy(abo_normals).float(),
+            "translation": torch.from_numpy(translation),
+            "scale":       scale,
+            "point_num":   instance_points.shape[0],
+            "model_id":    abo_id,
+            "idx":         idx,
+            "points_iou":  torch.from_numpy(points_iou).float(),
+            "occupancies": torch.from_numpy(occ_tgt).bool(),
+            "aug_matrix":  torch.eye(4).float(),
+        }
+
+        # GT params
+        if self.gt_data and abo_id in self.gt_mapping:
+            idx_gt      = self.gt_mapping[abo_id]
+            gt_scale    = self.gt_data['scale'][idx_gt].copy()
+            gt_shape    = self.gt_data['exponents'][idx_gt].copy()
+            gt_trans    = self.gt_data['translation'][idx_gt].copy()
+            gt_rotate   = self.gt_data['rotation'][idx_gt].copy()
+            gt_exist    = self.gt_data['exist'][idx_gt].copy()
+            gt_tapering = self.gt_data['tapering'][idx_gt].copy()
+            gt_bending  = self.gt_data['bending'][idx_gt].copy()
+
+            if self.normalize:
+                gt_trans = (gt_trans - translation) / scale
+                gt_scale = gt_scale / scale
+
+            rot_mat = torch.from_numpy(gt_rotate).float()
+            res.update({
+                'gt_scale':    torch.from_numpy(gt_scale).float(),
+                'gt_shape':    torch.from_numpy(gt_shape).float(),
+                'gt_trans':    torch.from_numpy(gt_trans).float(),
+                'gt_rotate':   rot_mat,
+                'gt_rotate_q': mat2quat(rot_mat.unsqueeze(0)).squeeze(0),
+                'gt_exist':    torch.from_numpy(gt_exist).float(),
+                'gt_tapering': torch.from_numpy(gt_tapering).float(),
+                'gt_bending':  torch.from_numpy(gt_bending).float(),
+            })
+
+        return res
+
+    def name(self):
+        return 'ASE_Object'

@@ -3,7 +3,7 @@ import torch.nn as nn
 import trimesh
 import numpy as np
 from scipy.spatial import KDTree
-from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO, ASE
+from superdec.data.dataloader import ShapeNet, ScenesDataset, ABO, ASE, ASE_Object
 from torch.utils.data import DataLoader, Subset
 from superdec.utils.safe_operations import safe_pow, safe_mul
 
@@ -13,7 +13,9 @@ def build_dataloader(cfg):
     elif cfg.dataloader.dataset == 'abo':
         ds = ABO(split=cfg.abo.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'ase':
-        ds = ASE(num_scenes=cfg.ase.num_scenes, cfg=cfg)
+        ds = ASE(split=cfg.ase.split, cfg=cfg)
+    elif cfg.dataloader.dataset == 'ase_object':
+        ds = ASE_Object(split=cfg.ase_object.split, cfg=cfg)
     elif cfg.dataloader.dataset == 'scenes_dataset':
         ds = ScenesDataset(cfg=cfg)
     else:

@@ -1,0 +1,23 @@
+# Hydra config for batch evaluation used by superoptim/batch_evaluate.py
+type: iou
+small: false
+num_epochs: 1000
+device: cuda
+
+optimization:
+  tapering: true
+  bending: true
+  reorient: false
+  pruning: false
+
+dataloader:
+  dataset: abo
+  batch_size: 128
+  num_workers: 8
+
+abo:
+  split: train
+  path: "data/ABO/processed-complete"
+  use_fps: true
+  load_occupancy: true
+  # normalize: true

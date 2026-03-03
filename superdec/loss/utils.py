@@ -135,6 +135,16 @@ def parametric_to_points_extended(
     y = ((y > 0).float() * 2 - 1) * torch.max(torch.abs(y), y.new_tensor(1e-6))
     z = ((z > 0).float() * 2 - 1) * torch.max(torch.abs(z), z.new_tensor(1e-6))
 
+    # --- Apply Tapering ---
+    kx = tapering[:, :, 0].unsqueeze(-1)
+    
+    ky = tapering[:, :, 1].unsqueeze(-1)
+    z_norm = z / a3
+    fx = kx * z_norm + 1.0
+    fy = ky * z_norm + 1.0
+    x = x * fx
+    y = y * fy
+    
     # --- Apply Bending ---
     x, y, z = apply_bending_axis_pt(
         x, y, z, 
@@ -154,15 +164,6 @@ def parametric_to_points_extended(
         bending_a[:, :, 0].unsqueeze(-1), 
         'z'
     )
-    
-    # --- Apply Tapering ---
-    kx = tapering[:, :, 0].unsqueeze(-1)
-    ky = tapering[:, :, 1].unsqueeze(-1)
-    z_norm = z / a3
-    fx = kx * z_norm + 1.0
-    fy = ky * z_norm + 1.0
-    x = x * fx
-    y = y * fy
 
     pts = torch.stack([x, y, z], -1)
     pts_world = torch.matmul(
@@ -233,6 +234,15 @@ def sdf_batch(points, out_dict):
     y = torch.where(y > 0, 1.0, -1.0) * torch.clamp(torch.abs(y), min=eps)
     z = torch.where(z > 0, 1.0, -1.0) * torch.clamp(torch.abs(z), min=eps)
     
+    # Apply bending
+    if 'bending_k' in out_dict and 'bending_a' in out_dict:
+        bending_k = out_dict['bending_k'] # (B, N, 3)
+        bending_a = out_dict['bending_a'] # (B, N, 3)
+        
+        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 0].unsqueeze(-1), bending_a[..., 0].unsqueeze(-1), 'z')
+        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 1].unsqueeze(-1), bending_a[..., 1].unsqueeze(-1), 'x')
+        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 2].unsqueeze(-1), bending_a[..., 2].unsqueeze(-1), 'y')
+    
     # Apply tapering
     if 'tapering' in out_dict:
         tapering = out_dict['tapering'] # (B, N, 2)
@@ -248,15 +258,6 @@ def sdf_batch(points, out_dict):
         
         x = x / fx
         y = y / fy
-
-    # Apply bending
-    if 'bending_k' in out_dict and 'bending_a' in out_dict:
-        bending_k = out_dict['bending_k'] # (B, N, 3)
-        bending_a = out_dict['bending_a'] # (B, N, 3)
-        
-        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 0].unsqueeze(-1), bending_a[..., 0].unsqueeze(-1), 'z')
-        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 1].unsqueeze(-1), bending_a[..., 1].unsqueeze(-1), 'x')
-        x, y, z = inverse_bending_axis(x, y, z, bending_k[..., 2].unsqueeze(-1), bending_a[..., 2].unsqueeze(-1), 'y')
     
     r0 = torch.sqrt(x**2 + y**2 + z**2)
     

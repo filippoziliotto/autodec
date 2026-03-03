@@ -6,7 +6,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from superdec.superdec import SuperDec
 from superdec.utils.predictions_handler_extended import PredictionHandler
-from superdec.data.dataloader import ShapeNet, Scene, ABO, ASE, denormalize_outdict, denormalize_points
+from superdec.data.dataloader import ShapeNet, Scene, ABO, ASE, ASE_Object, denormalize_outdict, denormalize_points
 from typing import Dict, Any
 from tqdm import tqdm
 
@@ -23,8 +23,12 @@ def main(cfg: DictConfig) -> None:
         filename = f'{cfg.dataset}_{cfg.dataloader.split}.npz'
         z_up = False
     elif cfg.dataset == 'ase':
-        dataset = ASE(cfg.ase.num_scenes, cfg=cfg)
-        filename = f'{cfg.dataset}_{cfg.ase.num_scenes}.npz'
+        dataset = ASE(cfg.ase.split, cfg=cfg)
+        filename = f'{cfg.dataset}_{cfg.ase.split}.npz'
+        z_up = False
+    elif cfg.dataset == 'ase_object':
+        dataset = ASE_Object(cfg.ase_object.split, cfg=cfg)
+        filename = f'{cfg.dataset}_{cfg.ase_object.split}.npz'
         z_up = False
     elif cfg.dataset == 'scene':
         dataset = Scene(cfg=cfg)

@@ -689,7 +689,9 @@ class LossGeometric(ParamLossGeometric):
                 C += cost_z
 
             if self.c_exist > 0:
-                cost_exist = self.c_exist * torch.abs(out_dict['exist'].view(B, P, 1) - gt_exist.view(B, 1, P))
+                pred_exist_exp = out_dict['exist'].view(B, P, 1).expand(B, P, P)
+                gt_exist_exp = gt_exist.view(B, 1, P).expand(B, P, P)
+                cost_exist = self.c_exist * F.binary_cross_entropy(pred_exist_exp, gt_exist_exp, reduction='none')
                 C += cost_exist
 
             C_np = C.cpu().numpy()
@@ -715,42 +717,47 @@ class LossGeometric(ParamLossGeometric):
         mask = (gt_exist > 0.5).float()
 
         # Existance (binary cross-entropy)
-        exist_loss = nn.BCELoss()(out_dict['exist'], mask)
+        exist_loss = nn.BCELoss()(out_dict['exist'], (gt_exist > 0.5).float())
         loss += self.w_exist * exist_loss
         loss_dict['param_exist'] = exist_loss.item()
         
         # Geometric
+        # geometric_loss = self.geometric_error_cd(pred_pts, gt_pts, gt_exist)
         geometric_loss = self.geometric_error_cd(pred_pts, gt_pts, mask)
         loss += self.w_geometric * geometric_loss
         loss_dict['param_geometric'] = geometric_loss.item()
         
-        with torch.no_grad():
-            pred_xy = out_dict['scale'][..., 0:2]                 # (B, P, 2)
-            gt_xy = gt_scale[..., 0:2]                            # (B, P, 2)
-            gt_xy_swapped = gt_xy[..., [1, 0]]
-            l1_orig = torch.abs(pred_xy - gt_xy).sum(dim=-1)      # (B, P)
-            l1_swap = torch.abs(pred_xy - gt_xy_swapped).sum(dim=-1)
-            swap_mask = (l1_swap < l1_orig)                       # (B, P)
-
-            # build matched gt_scale (swap x,y where needed)
-            gt_scale_matched = gt_scale.clone()
-            new_xy = torch.where(swap_mask.unsqueeze(-1), gt_xy_swapped, gt_xy)
-            gt_scale_matched[..., 0:2] = new_xy
-        
-        pred_pts_forced = parametric_to_points_extended(
-            gt_trans, 
-            out_dict['rotate'], 
-            gt_scale,
-            gt_shape,
-            out_dict['tapering'],
-            out_dict['bending_k'],
-            out_dict['bending_a'],
-            gt_sq_etas,
-            gt_sq_omegas
-        )
-        geometric_loss_forced = self.geometric_error_cd(pred_pts_forced, gt_pts, mask)
-        loss += self.w_geometric_f * geometric_loss_forced
-        loss_dict['param_geometric_forced'] = geometric_loss_forced.item()
+        if self.w_geometric_f > 0:
+            z_t = torch.zeros_like(gt_tapering)
+            z_bk = torch.zeros_like(gt_bending[..., 0::2])
+            z_ba = torch.zeros_like(gt_bending[..., 1::2])
+            gt_pts = parametric_to_points_extended(
+                gt_trans,
+                gt_rotate,
+                gt_scale,
+                gt_shape,
+                z_t,
+                z_bk,
+                z_ba,
+                gt_sq_etas,
+                gt_sq_omegas
+            )
+            
+            pred_pts_forced = parametric_to_points_extended(
+                gt_trans, 
+                out_dict['rotate'], 
+                out_dict['scale'],
+                out_dict['shape'],
+                z_t,
+                z_bk,
+                z_ba,
+                pred_sq_etas,
+                pred_sq_omegas
+            )
+            # geometric_loss_forced = self.geometric_error_cd(pred_pts_forced, gt_pts, gt_exist)
+            geometric_loss_forced = self.geometric_error_cd(pred_pts_forced, gt_pts, mask)
+            loss += self.w_geometric_f * geometric_loss_forced
+            loss_dict['param_geometric_forced'] = geometric_loss_forced.item()
         
         # stop trainer from complaining about unused parameters (TODO fix this)
         loss += 0 * out_dict['assign_matrix'].mean()

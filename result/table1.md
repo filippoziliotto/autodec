@@ -39,6 +39,42 @@ Saving per-object metrics to data/output_npz/shapenet/shapenet_test_optimized_no
 
 ========== SuperDec Evaluation ==========
 Config:
+type: cd
+small: false
+num_epochs: 1000
+device: cuda
+optimization:
+  tapering: false
+  bending: false
+  reorient: false
+  pruning: false
+dataloader:
+  dataset: shapenet
+  batch_size: 32
+  num_workers: 8
+shapenet:
+  split: test
+  path: data/ShapeNet
+  categories: null
+  load_occupancy: true
+  use_fps: true
+
+Processing batches: 100%|██████████| 274/274 [7:32:26<00:00, 99.08s/it]
+Saving optimized results to data/output_npz/shapenet/cd/test.npz...
+Saving per-object metrics to data/output_npz/shapenet/cd/test_metrics.csv...
+
+----- Evaluation Results -----
+          mean_chamfer_l1: 0.015962
+          mean_chamfer_l2: 0.000428
+                 mean_iou: 0.503051
+             mean_f-score: 0.362205
+          mean_f-score-15: 0.606642
+          mean_f-score-20: 0.754342
+       avg_num_primitives: 5.793852
+
+
+========== SuperDec Evaluation ==========
+Config:
 type: base
 prefix: shapenet/shapenet_test
 small: false

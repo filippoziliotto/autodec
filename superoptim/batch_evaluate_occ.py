@@ -23,7 +23,7 @@ def main(cfg: DictConfig):
     module_type = 'none'
     dataset = cfg.dataloader.get('dataset', 'shapenet')
     source_folder = cfg.get('source_folder', dataset)
-    split = cfg.get(dataset)['num_scenes']
+    split = cfg.get(dataset)['split']
     small = cfg.get('small', False)
 
     print(f"Evaluating {module_type} on {dataset} {split}...")
@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
         if getattr(cfg.optimization, "bending", True): extras += "b"
         if getattr(cfg.optimization, "reorient", True): extras += "r"
         if getattr(cfg.optimization, "pruning", False): extras += "p"
-    folder_name = module_type + (f"_{extras}" if extras else "")
+    folder_name = module_type + (f"_{extras}" if extras else "") + "_occ"
     output_dir = os.path.join("data", "output_npz", source_folder, folder_name)
     if small:
         output_dir = output_dir.replace("output_npz", "output_npz/small")

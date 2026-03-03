@@ -9,7 +9,7 @@ optimization:
   bending: true
 
 dataloader:
-  dataset: ase
+  dataset: ase_object
   batch_size: 256
   num_workers: 4
 
@@ -17,5 +17,13 @@ ase:
   instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
   csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
   abo_path: data/ABO/processed-complete
-  num_scenes: 50
+  split: test
   normalize: false
+
+ase_object:
+  instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
+  csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
+  abo_path: data/ABO/processed-complete
+  split: test
+  normalize: false
+  gt_params_path: data/output_npz/abo/iou_tb/train.npz
