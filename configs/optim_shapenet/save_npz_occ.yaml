@@ -10,6 +10,7 @@ dataloader:
   num_workers: 4
 trainer:
   occlusions: True
+  force_occlusions: True
 shapenet:
   path: "data/ShapeNet"
   normalize: true

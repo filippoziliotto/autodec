@@ -74,7 +74,8 @@ def get_transforms(split: str, cfg):
 
 def get_occlusion_transforms(split: str, cfg):
     if split != 'train' or 'trainer' not in cfg or not cfg.trainer.occlusions:
-        return None
+        if 'trainer' not in cfg or not cfg.trainer.force_occlusions:
+            return None
     return Compose([
         # BackFaceCulling(p=0.5),
         RandomOcclusion(p=0.25),

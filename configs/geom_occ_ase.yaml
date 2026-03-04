@@ -3,13 +3,14 @@ use_wandb: true
 wandb:
   project: superdec
   entity: gtave
-run_name: shapenet_geom_exist_0.01_f_lolr_big
-dataset: shapenet
+run_name: shapenet_geom_ase_004_lowfilter_hq
+dataset: ase_object
 device: cuda
 
 checkpoints:
-  resume_from: checkpoints/shapenet_geom_422/epoch_300.pt
-  keep_epoch: true
+  # resume_from: checkpoints/shapenet_geom_022/epoch_1000.pt
+  resume_from: checkpoints/shapenet_iou_371/epoch_1000.pt
+  keep_epoch: False
 
 superdec:
   extended: true
@@ -57,15 +58,17 @@ superdec:
         normalize: True
         eps: 0  
 
-shapenet:
-  path: data/ShapeNet
-  categories: null #['03001627'] 
-  normalize: True # NEEDED TO GENERALIZE TO OCCLUSIONS
-  gt_train_path: data/output_npz/shapenet_iou_371/iou_tb/train.npz
-  gt_val_path: data/output_npz/shapenet_iou_371/iou_tb/val.npz
+ase_object:
+  instances_path: /capstor/store/cscs/swissai/a115/data/ase_instances_500
+  csv_path: /capstor/store/cscs/swissai/a115/data/ase_wai_train_500/object_info_new.csv
+  abo_path: data/ABO/processed-complete
+  split: train
+  normalize: True
+  gt_params_path: data/output_npz/abo/iou_tb/train.npz
   filter:
     metric: iou
-    threshold: 0.90
+    threshold: 0.80
+
 
 trainer:
   save_path: checkpoints
@@ -74,8 +77,8 @@ trainer:
   batch_size: 32
   num_workers: 16 # augmentations are slow
   evaluate_every_n_epochs: 10
-  augmentations: True
-  occlusions: True 
+  augmentations: False
+  occlusions: False
 optimizer:
   lr: 1e-4 #1e-4 #1e-4   0.001
   weight_decay: 0 # default
@@ -94,11 +97,9 @@ loss:
   w_geometric: 1.0
   w_geometric_f: 1.0
   w_exist: 0.01
-
-  c_geometric: 1.0 
+  c_geometric: 1.0
   c_z_align: 0.0
   c_exist: 0.01
-
   n_samples_cost: 64
   n_samples: 512
   

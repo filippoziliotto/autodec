@@ -59,6 +59,15 @@ class BatchSuperQMulti(nn.Module):
         self.points = torch.zeros(B, self.M_points, 3, device=device)
         self.occupancies = torch.zeros(B, self.M_points_iou, dtype=torch.bool, device=device)
         
+        self.w_overlap = 1.0
+        self.w_bbox = 1.0
+        self.w_sdf = 1.0
+        if cfg is not None:
+            self.w_sdf = getattr(cfg, 'w_sdf', 1.0)
+            self.w_bbox = getattr(cfg, 'w_bbox', 1.0)
+            self.w_overlap = getattr(cfg, 'w_overlap', 1.0)
+        print('unsing weights:', self.w_sdf, self.w_bbox, self.w_overlap)
+        
         for i, idx in enumerate(indices):
             # --- Params ---
             mask = (pred_handler.exist[idx] > 0.5)
@@ -405,7 +414,7 @@ class BatchSuperQMulti(nn.Module):
 
         L_overlap = 1e-1 * overlap.mean(dim=1)
         
-        loss = -torch.log(iou) + Lsdf + L_bbox + L_overlap
+        loss = -torch.log(iou) + self.w_sdf * Lsdf + self.w_bbox * L_bbox + self.w_overlap * L_overlap
         return loss, iou, Lsdf, L_overlap, L_overlap
     
     def compute_losses(self, forward_out):
