@@ -4,7 +4,15 @@ import numpy as np
 from .transform import PointCloudsTransform
 # from superoptim.utils import timing
 
-def get_random_camera(points):
+def get_random_camera(points, phi_range=(0, np.pi)):
+    """Sample a random camera position on a sphere around the point cloud.
+
+    Args:
+        points: (N, 3+) array of points.
+        phi_range (tuple): (min_phi, max_phi) range for the polar angle in radians.
+            Default (0, pi) covers the full sphere. Use e.g. (pi/4, 3*pi/4) to
+            exclude the top and bottom caps.
+    """
     # Handle empty points safely
     if points is None or points.shape[0] == 0:
         return np.array([0.0, 0.0, 0.0])
@@ -16,7 +24,7 @@ def get_random_camera(points):
     
     # Random camera on sphere around bbox
     theta = random.uniform(0, 2 * np.pi)
-    phi = random.uniform(0, np.pi)
+    phi = random.uniform(phi_range[0], phi_range[1])
     camera_pos = bbox_center + bbox_size * np.array([
         np.sin(phi) * np.cos(theta),
         np.sin(phi) * np.sin(theta),
@@ -49,6 +57,7 @@ class BackFaceCulling(PointCloudsTransform):
         camera_position=None,
         threshold=0.0,
         keep_points_without_normals=True,
+        phi_range=None,
         always_apply=False,
         p=0.5,
     ):
@@ -56,6 +65,7 @@ class BackFaceCulling(PointCloudsTransform):
         self.camera_position = camera_position
         self.threshold = threshold
         self.keep_points_without_normals = keep_points_without_normals
+        self.phi_range = phi_range if phi_range is not None else (0, np.pi)
 
     @property
     def targets_as_params(self):
@@ -71,7 +81,7 @@ class BackFaceCulling(PointCloudsTransform):
 
         normals = params.get("normals", None)
         if self.camera_position is None:
-            camera_pos = get_random_camera(points)
+            camera_pos = get_random_camera(points, phi_range=self.phi_range)
         else:
             camera_pos = np.array(self.camera_position)
         
@@ -110,7 +120,7 @@ class BackFaceCulling(PointCloudsTransform):
         return labels[mask]
 
     def get_transform_init_args_names(self):
-        return ("camera_position", "threshold", "keep_points_without_normals")
+        return ("camera_position", "threshold", "keep_points_without_normals", "phi_range")
 
 
 class RandomOcclusion(PointCloudsTransform):
@@ -139,6 +149,7 @@ class RandomOcclusion(PointCloudsTransform):
         occluder_type="sphere",
         size_range=(0.02,0.2),
         camera_position=None,
+        phi_range=None,
         always_apply=False,
         p=0.5,
     ):
@@ -150,6 +161,7 @@ class RandomOcclusion(PointCloudsTransform):
         self.occluder_type = occluder_type
         self.size_range = size_range
         self.camera_position = camera_position
+        self.phi_range = phi_range if phi_range is not None else (0, np.pi)
 
     @property
     def targets_as_params(self):
@@ -170,7 +182,7 @@ class RandomOcclusion(PointCloudsTransform):
         
         # Get camera position
         if self.camera_position is None:
-            camera_pos = get_random_camera(points)
+            camera_pos = get_random_camera(points, phi_range=self.phi_range)
         else:
             camera_pos = np.array(self.camera_position)
             
@@ -309,7 +321,7 @@ class RandomOcclusion(PointCloudsTransform):
         return labels[mask]
 
     def get_transform_init_args_names(self):
-        return ("num_occluders", "occluder_type", "size_range", "camera_position")
+        return ("num_occluders", "occluder_type", "size_range", "camera_position", "phi_range")
 
 
 class HRPOcclusion(PointCloudsTransform):
@@ -333,12 +345,14 @@ class HRPOcclusion(PointCloudsTransform):
         self,
         camera_position=None,
         radius_multiplier=1e3,
+        phi_range=None,
         always_apply=False,
         p=0.5,
     ):
         super().__init__(always_apply, p)
         self.camera_position = camera_position
         self.radius_multiplier = radius_multiplier
+        self.phi_range = phi_range if phi_range is not None else (0, np.pi)
 
     @property
     def targets_as_params(self):
@@ -353,7 +367,7 @@ class HRPOcclusion(PointCloudsTransform):
 
         # Get camera position
         if self.camera_position is None:
-            camera_pos = get_random_camera(points)
+            camera_pos = get_random_camera(points, phi_range=self.phi_range)
         else:
             camera_pos = np.array(self.camera_position)
         
@@ -411,4 +425,4 @@ class HRPOcclusion(PointCloudsTransform):
         return labels[mask]
 
     def get_transform_init_args_names(self):
-        return ("camera_position", "radius_multiplier")
+        return ("camera_position", "radius_multiplier", "phi_range")

@@ -567,6 +567,59 @@ class RandomMove3d(Move3d):
             "y_max": self.y_max,
             "z_max": self.z_max,
         }
+
+class RandomJitter(PointCloudsTransform):
+    """Add small clipped Gaussian noise to each point independently.
+
+    Labels and normals are unchanged; only the xyz positions are perturbed.
+
+    Args:
+        sigma (float): standard deviation of the Gaussian noise. Default: 0.01.
+        clip  (float): maximum absolute noise value (|noise| <= clip). Default: 0.05.
+        p     (float): probability of applying the transform. Default: 1.0.
+
+    Targets:
+        points
+        normals
+        features
+        labels
+    """
+
+    def __init__(self, sigma=0.01, clip=0.05, always_apply=False, p=1.0):
+        super().__init__(always_apply, p)
+        self.sigma = sigma
+        self.clip = clip
+
+    def get_params(self):
+        return {"sigma": self.sigma, "clip": self.clip}
+
+    def apply(self, points, sigma, clip, **params):
+        points = np.asarray(points, dtype=np.float32)
+        noise = np.clip(
+            np.random.normal(0.0, sigma, size=points[:, :3].shape).astype(np.float32),
+            -clip, clip,
+        )
+        out = points.copy()
+        out[:, :3] += noise
+        return out
+
+    def apply_to_transform_info(self, transform_info, **params):
+        # Jitter is not a linear transform; leave aug_matrix unchanged
+        return transform_info
+
+    def apply_to_normals(self, normals, **params):
+        return normals
+
+    def apply_to_features(self, features, **params):
+        return features
+
+    def apply_to_labels(self, labels, **params):
+        return labels
+
+    def get_transform_init_args(self):
+        return {"sigma": self.sigma, "clip": self.clip}
+
+
 class Scale3d(PointCloudsTransform):
     """Scale the input point cloud uniformly.
 

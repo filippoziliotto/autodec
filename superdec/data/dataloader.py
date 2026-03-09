@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from torch_geometric.nn import fps
 
 from superdec.utils.transforms import mat2quat
-from superdec.data.transform import RotateAroundAxis3d, Scale3d, RandomMove3d, Compose, rotate_around_axis
+from superdec.data.transform import RotateAroundAxis3d, Scale3d, RandomMove3d, RandomJitter, Compose, rotate_around_axis
 from superdec.data.transform_occlusions import BackFaceCulling, RandomOcclusion, HRPOcclusion
 from superdec.loss.sampler import EqualDistanceSamplerSQ
 from superdec.loss.loss import parametric_to_points_extended
@@ -74,12 +74,17 @@ def get_transforms(split: str, cfg):
 
 def get_occlusion_transforms(split: str, cfg):
     if split != 'train' or 'trainer' not in cfg or not cfg.trainer.occlusions:
-        if 'trainer' not in cfg or not cfg.trainer.force_occlusions:
+        if 'trainer' not in cfg or not getattr(cfg.trainer, 'force_occlusions', False):
             return None
+    new_camera_sample = 'trainer' in cfg and getattr(cfg.trainer, 'new_camera_sample', False)
+    # When new_camera_sample is enabled, restrict phi to the equatorial band
+    # (pi/4 .. 3*pi/4), excluding top- and bottom-cap viewpoints that don't
+    # produce meaningful occlusions.
+    phi_range = (np.pi / 4, 3 * np.pi / 4) if new_camera_sample else None
     return Compose([
         # BackFaceCulling(p=0.5),
-        RandomOcclusion(p=0.25),
-        HRPOcclusion(p=0.25), # kind of slow
+        RandomOcclusion(p=0.25, phi_range=phi_range),
+        HRPOcclusion(p=0.25, phi_range=phi_range), # kind of slow
     ])
 
 class ScenesDataset(Dataset):
@@ -754,7 +759,16 @@ class ASE_Object(Dataset):
         print(f"ASE_Object [{split}]: {len(self.abo_ids)} objects, "
               f"{sum(len(self.occlusion_map[i]) for i in self.abo_ids)} total instances.")
 
-        # GT params (keyed by abo_id)
+        # RandomJitter augmentation — enabled for train split unless disabled in config
+        jitter_cfg = getattr(cfg.ase_object, 'jitter', None)
+        enable_jitter = (split == 'train') and (jitter_cfg is not False)
+        if enable_jitter and jitter_cfg is not None and jitter_cfg is not True:
+            sigma = float(getattr(jitter_cfg, 'sigma', 0.01))
+            clip  = float(getattr(jitter_cfg, 'clip',  0.05))
+        else:
+            sigma, clip = 0.01, 0.05
+        self.jitter = RandomJitter(sigma=sigma, clip=clip, p=1.0) if enable_jitter else None
+
         self.gt_data, self.gt_mapping = {}, {}
         self.gt_params_path = getattr(cfg.ase_object, 'gt_params_path', None)
         if self.gt_params_path is not None:
@@ -946,6 +960,7 @@ class ASE_Object(Dataset):
         instance_points = instance_points[sub_idxs]
         normals         = normals[sub_idxs]
 
+
         if self.normalize:
             instance_points, translation, scale = normalize_points(instance_points)
             points_iou = (points_iou - translation) / scale
@@ -954,6 +969,11 @@ class ASE_Object(Dataset):
             translation = np.zeros(3, dtype=np.float32)
             scale = 1.0
 
+        # Apply RandomJitter (train only)
+        if self.jitter is not None:
+            jitter_params = self.jitter.get_params()
+            instance_points = self.jitter.apply(instance_points, **jitter_params)
+        
         res = {
             "points":      torch.from_numpy(instance_points).float(),
             "normals":     torch.from_numpy(normals).float(),
