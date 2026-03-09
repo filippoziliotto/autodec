@@ -260,6 +260,8 @@ def sdfs_from_outdict(outdict, points, device='cuda'):
         else:
             return x, y, z
 
+        mask = torch.abs(kb_axis) > 1e-3
+
         inv_kb = 1.0 / (kb_axis + 1e-6)
 
         angle_offset = torch.atan2(v, u)
@@ -267,16 +269,16 @@ def sdfs_from_outdict(outdict, points, device='cuda'):
         gamma = torch.atan2(w, inv_kb - Rval)
         r = inv_kb - torch.sqrt(w**2 + (inv_kb - Rval)**2)
 
-        u = u - (Rval - r) * torch.cos(alpha_axis)
-        v = v - (Rval - r) * torch.sin(alpha_axis)
-        w = inv_kb * gamma
+        u_new = torch.where(mask, u - (Rval - r) * torch.cos(alpha_axis), u)
+        v_new = torch.where(mask, v - (Rval - r) * torch.sin(alpha_axis), v)
+        w_new = torch.where(mask, inv_kb * gamma, w)
 
         if axis == 'z':
-            return u, v, w
+            return u_new, v_new, w_new
         elif axis == 'x':
-            return w, u, v
+            return w_new, u_new, v_new
         elif axis == 'y':
-            return v, w, u
+            return v_new, w_new, u_new
 
     x, y, z = inverse_bending_axis(x, y, z, kb[..., 0].unsqueeze(-1), alpha[..., 0].unsqueeze(-1), 'z')
     x, y, z = inverse_bending_axis(x, y, z, kb[..., 1].unsqueeze(-1), alpha[..., 1].unsqueeze(-1), 'x')
