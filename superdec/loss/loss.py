@@ -249,12 +249,12 @@ class ParamLoss(BaseLoss):
                 C += cost_exist
 
             C_np = C.cpu().numpy()
-            
+
             indices = []
             for b in range(B):
                 row_ind, col_ind = linear_sum_assignment(C_np[b])
                 indices.append(col_ind)
-                
+
             indices = torch.tensor(np.array(indices), device=gt_scale.device)
             batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
             gt_scale = gt_scale[batch_idx, indices]
@@ -469,12 +469,12 @@ class ParamLossGeometric(ParamLoss):
                 C += cost_exist
 
             C_np = C.cpu().numpy()
-            
+
             indices = []
             for b in range(B):
                 row_ind, col_ind = linear_sum_assignment(C_np[b])
                 indices.append(col_ind)
-                
+
             indices = torch.tensor(np.array(indices), device=gt_scale.device)
             batch_idx = torch.arange(B, device=gt_scale.device).unsqueeze(1).expand(B, P)
             gt_pts = gt_pts[batch_idx, indices]
@@ -605,6 +605,7 @@ class LossGeometric(ParamLossGeometric):
         self.w_geometric = getattr(cfg, 'w_geometric', 1.0)
         self.w_geometric_f = getattr(cfg, 'w_geometric_f', 1.0)
         self.c_z_align = getattr(cfg, 'c_z_align', 0.0)
+        self.w_iou = getattr(cfg, 'w_iou', 0.0)
         
         
     def sample(self, scale, shape):
@@ -711,6 +712,8 @@ class LossGeometric(ParamLossGeometric):
             gt_exist = gt_exist[batch_idx, indices]
             gt_tapering = gt_tapering[batch_idx, indices]
             gt_bending = gt_bending[batch_idx, indices]
+            gt_sq_etas = gt_sq_etas[batch_idx, indices]
+            gt_sq_omegas = gt_sq_omegas[batch_idx, indices]
         
         loss = 0
         loss_dict = {}            
@@ -759,6 +762,25 @@ class LossGeometric(ParamLossGeometric):
             loss += self.w_geometric_f * geometric_loss_forced
             loss_dict['param_geometric_forced'] = geometric_loss_forced.item()
         
+        # IoU Loss
+        if self.w_iou > 0:
+            points_iou = batch['points_iou'].cuda().float()
+            gt_occ = batch['occupancies'].cuda().bool()
+            exist_weights = out_dict['exist']  # (B, N, 1)
+            all_sdfs_iou = sdf_batch(points_iou, out_dict)  # (B, N, M_iou)
+            temperature_iou = 1e-3
+            prob_prim = torch.sigmoid(-all_sdfs_iou / temperature_iou)
+            p_occupied = exist_weights * prob_prim  # (B, N, M_iou)
+            p_occupied = torch.clamp(p_occupied, min=0.0, max=0.9999)
+            pred_occ = 1.0 - torch.exp(torch.sum(torch.log(1.0 - p_occupied), dim=1))  # (B, M_iou)
+            intersection = (pred_occ * gt_occ).sum(dim=1)
+            union = (pred_occ + gt_occ - pred_occ * gt_occ).sum(dim=1)
+            iou = (intersection + 1e-6) / (torch.clamp(union, min=1.0) + 1e-6)
+            L_iou = -torch.log(iou).mean()
+            loss += self.w_iou * L_iou
+            loss_dict['iou'] = iou.mean().item()
+            loss_dict['iou_loss'] = L_iou.item()
+
         # stop trainer from complaining about unused parameters (TODO fix this)
         loss += 0 * out_dict['assign_matrix'].mean()
         loss_dict['all'] = loss.item()

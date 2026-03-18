@@ -26,8 +26,12 @@ def build_model(cfg):
     return model.cuda() if torch.cuda.is_available() else model
 
 def build_optimizer(cfg, model):
-    if cfg.optimizer.only_heads :
+    if cfg.optimizer.only_heads:
         return Adam(model.heads.parameters(), lr=cfg.optimizer.lr, betas=cfg.optimizer.betas, weight_decay=cfg.optimizer.weight_decay)
+    elif cfg.optimizer.all_but_heads:
+        heads_params = set(model.heads.parameters())
+        params = [p for p in model.parameters() if p not in heads_params]
+        return Adam(params, lr=cfg.optimizer.lr, betas=cfg.optimizer.betas, weight_decay=cfg.optimizer.weight_decay)
     else:
         return Adam(model.parameters(), lr=cfg.optimizer.lr, betas=cfg.optimizer.betas, weight_decay=cfg.optimizer.weight_decay)
 

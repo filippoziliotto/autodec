@@ -24,6 +24,8 @@ def main(cfg: DictConfig):
     source_folder = cfg.get('source_folder', dataset)
     split = cfg.get(dataset).get('split', 'test')
     small = cfg.get('small', False)
+    recompute_inplace = cfg.get('recompute_inplace', False)
+    # split += '_single_axis'
 
     try:
         # Import dynamically based on type
@@ -36,6 +38,7 @@ def main(cfg: DictConfig):
 
     print(f"Evaluating {module_type} on {dataset} {split}...")
     input_npz = f"data/output_npz/{source_folder}/{dataset}_{split}.npz"
+    if recompute_inplace: input_npz = f"data/output_npz/{source_folder}/{split}.npz"
     # Determine extras suffix (used for folder naming)
     extras = ""
     if module_type == "iou":
@@ -45,6 +48,7 @@ def main(cfg: DictConfig):
         if getattr(cfg.optimization, "pruning", False): extras += "p"
     folder_name = module_type + (f"_{extras}" if extras else "")
     output_dir = os.path.join("data", "output_npz", source_folder, folder_name)
+    if recompute_inplace: output_dir = os.path.join("data", "output_npz", source_folder)
     if small:
         output_dir = output_dir.replace("output_npz", "output_npz/small")
     os.makedirs(output_dir, exist_ok=True)
@@ -88,6 +92,9 @@ def main(cfg: DictConfig):
         'f-score': 0.0,
         'f-score-15': 0.0,
         'f-score-20': 0.0,
+        'normals': 0.0,
+        'normals completeness': 0.0,
+        'normals accuracy': 0.0,
         'num_primitives': 0.0,
         'count': 0
     }
@@ -210,6 +217,9 @@ def main(cfg: DictConfig):
             aggregated_metrics['f-score'] += out_dict_cur.get('f-score', 0.0)
             aggregated_metrics['f-score-15'] += out_dict_cur.get('f-score-15', 0.0)
             aggregated_metrics['f-score-20'] += out_dict_cur.get('f-score-20', 0.0)
+            aggregated_metrics['normals'] += out_dict_cur.get('normals', 0.0)
+            aggregated_metrics['normals completeness'] += out_dict_cur.get('normals completeness', 0.0)
+            aggregated_metrics['normals accuracy'] += out_dict_cur.get('normals accuracy', 0.0)
             aggregated_metrics['num_primitives'] += num_prim
             aggregated_metrics['count'] += 1
             
@@ -222,6 +232,9 @@ def main(cfg: DictConfig):
                 'f-score': out_dict_cur.get('f-score', 0.0),
                 'f-score-15': out_dict_cur.get('f-score-15', 0.0),
                 'f-score-20': out_dict_cur.get('f-score-20', 0.0),
+                'normals': out_dict_cur.get('normals', 0.0),
+                'normals completeness': out_dict_cur.get('normals completeness', 0.0),
+                'normals accuracy': out_dict_cur.get('normals accuracy', 0.0),
                 'num_primitives': int(num_prim)
             })
 
@@ -251,7 +264,7 @@ def main(cfg: DictConfig):
     print(f"Saving per-object metrics to {metrics_csv}...")
     import csv
     with open(metrics_csv, 'w', newline='') as csvfile:
-        fieldnames = ['index', 'name', 'chamfer-L1', 'chamfer-L2', 'iou', 'f-score', 'f-score-15', 'f-score-20', 'num_primitives']
+        fieldnames = ['index', 'name', 'chamfer-L1', 'chamfer-L2', 'iou', 'f-score', 'f-score-15', 'f-score-20', 'normals', 'normals completeness', 'normals accuracy', 'num_primitives']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for data in object_metrics:
@@ -266,6 +279,9 @@ def main(cfg: DictConfig):
         mean_fscore = aggregated_metrics['f-score'] / count
         mean_fscore_15 = aggregated_metrics['f-score-15'] / count
         mean_fscore_20 = aggregated_metrics['f-score-20'] / count
+        mean_normals = aggregated_metrics['normals'] / count
+        mean_normals_completeness = aggregated_metrics['normals completeness'] / count
+        mean_normals_accuracy = aggregated_metrics['normals accuracy'] / count
         mean_num_primitives = aggregated_metrics['num_primitives'] / count
         
         print("\n----- Evaluation Results -----")
@@ -275,6 +291,9 @@ def main(cfg: DictConfig):
         print(f"{'mean_f-score':>25}: {mean_fscore:.6f}")
         print(f"{'mean_f-score-15':>25}: {mean_fscore_15:.6f}")
         print(f"{'mean_f-score-20':>25}: {mean_fscore_20:.6f}")
+        print(f"{'mean_normals':>25}: {mean_normals:.6f}")
+        print(f"{'mean_normals_completeness':>25}: {mean_normals_completeness:.6f}")
+        print(f"{'mean_normals_accuracy':>25}: {mean_normals_accuracy:.6f}")
         print(f"{'avg_num_primitives':>25}: {mean_num_primitives:.6f}")
         
         # Sort by Chamfer-L1 descending (worst first)
