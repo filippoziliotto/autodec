@@ -1,9 +1,9 @@
+import glob
+import argparse
 import os
 import sys
 import torch
 import numpy as np
-from omegaconf import OmegaConf
-from superdec.superdec import SuperDec
 from superdec.utils.predictions_handler_extended import PredictionHandler
 from superdec.data.dataloader import denormalize_outdict, denormalize_points
 import viser
@@ -75,26 +75,50 @@ def visualize_handler(server, superq, sdf_values, plot = False):
             point_size=0.01,
         )
 
-def main():
-    if len(sys.argv) > 1:
-        object_name = sys.argv[1]
-    else:
-        object_name = "round_table"
-    pred_handler = PredictionHandler.from_npz(f"data/output_npz/objects/{object_name}.npz")
-    print(f"Optimizing {pred_handler.names[0]}")
-    
+def parse_args():
+    parser = argparse.ArgumentParser(description="Optimize one object from NPZ predictions")
+    parser.add_argument(
+        "--index",
+        type=int,
+        default=0, # 953 5983
+        help="Object index inside the npz file",
+    )
+    parser.add_argument(
+        "--npz-path",
+        type=str,
+        default="../final/outputs/shapenet_iou_final/shapenet_test.npz",
+        help="Path to predictions npz",
+    )
+    return parser.parse_args()
+
+
+def main(index: int, npz_path: str):
+    pred_handler = PredictionHandler.from_npz(npz_path)
+    if index < 0 or index >= len(pred_handler.names):
+        raise IndexError(
+            f"Index {index} is out of bounds for predictions of size {len(pred_handler.names)}"
+        )
+
+    object_name = pred_handler.names[index]
+    shapenet_matches = glob.glob(f"data/ShapeNet/*/{object_name}/pointcloud.npz")
+    if not shapenet_matches:
+        raise FileNotFoundError(
+            f"Could not find pointcloud.npz for '{object_name}' in any data/ShapeNet subdirectory"
+        )
+    ply_path = shapenet_matches[0]
     superq = BatchSuperQMulti(
         pred_handler=pred_handler,
-        indices=[0],
-        ply_paths=[f"data/ShapeNet/04379243/{pred_handler.names[0]}/pointcloud.npz"],
-        # ply_paths=[f"data/ABO/processed-complete/{pred_handler.names[0]}/pointcloud.npz"],
+        indices=[index],
+        ply_paths=[ply_path],
     )
+    print(f"Optimizing {object_name} (index={index})")
+    
     param_groups = superq.get_param_groups()
     optimizer = torch.optim.Adam(param_groups)
 
     pred_handler, meshes = superq.update_handler(denormalize=False)
     orig_mesh = meshes[0]
-    plot_pred_handler(pred_handler, superq.truncation, filename="superq_plot_orig.png")
+    plot_pred_handler(pred_handler, superq.truncation, idx=index, filename="superq_plot_orig.png")
 
     server = viser.ViserServer()
     server.scene.set_up_direction([0.0, 1.0, 0.0])
@@ -193,4 +217,5 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     np.random.seed(0)
     random.seed(0)
-    main()
+    args = parse_args()
+    main(index=args.index, npz_path=args.npz_path)

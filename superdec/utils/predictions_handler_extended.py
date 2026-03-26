@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from typing import Dict
 import trimesh
+from skimage import measure
 
 from superdec.utils.visualizations import generate_ncolors
 from superdec.utils.transforms import transform_to_primitive_frame
@@ -132,7 +133,7 @@ class PredictionHandler:
                 meshes.append(None)
         return meshes
 
-    def get_mesh(self, index, resolution: int = 100, colors=True):
+    def get_mesh(self, index, resolution: int = 100, colors=True, marching=False):
         P = self.scale.shape[1]
 
         vertices = []
@@ -143,11 +144,15 @@ class PredictionHandler:
         os_vertices = 0
         for p in range(P):
             if self.exist[index, p] > 0.5:
-                mesh = self._superquadric_mesh(
+                mesh_f = self._superquadric_mesh
+                if marching:
+                    mesh_f = self._superquadric_mesh_marching_cubes
+                    
+                mesh = mesh_f(
                     self.scale[index, p], self.exponents[index, p],
                     self.rotation[index, p], self.translation[index, p], self.tapering[index, p], self.bending[index, p], resolution
                 )
-                
+            
                 vertices_cur, faces_cur = mesh
 
                 vertices.append(vertices_cur)
@@ -339,3 +344,89 @@ class PredictionHandler:
 
         triangles = np.concatenate([main_body_triangles, seam_triangles, cap_triangles], axis=0)
         return np.array(vertices), np.array(triangles)
+
+    def _superquadric_mesh_marching_cubes(self, scale, exponents, rotation, translation, tapering, bending, resolution, device='cpu'):
+        """Generate superquadric mesh using marching cubes algorithm.
+        
+        This is an alternative implementation that:
+        1. Evaluates the SDF on a 3D grid using sdfs_from_outdict
+        2. Extracts the isosurface at level 0 using marching cubes
+        
+        Args:
+            scale: (3,) array of scales
+            exponents: (2,) array of exponents  
+            rotation: (3, 3) rotation matrix
+            translation: (3,) translation vector
+            tapering: (2,) tapering parameters
+            bending: (6,) bending parameters
+            resolution: grid resolution for marching cubes
+            device: torch device (default 'cpu')
+        
+        Returns:
+            vertices: (n_vertices, 3) array of vertex positions
+            faces: (n_faces, 3) array of face indices
+        """
+        # Import here to avoid circular imports
+        from superoptim.evaluation import sdfs_from_outdict
+        
+        # Convert to numpy if needed (do this first to use translation for grid centering)
+        if isinstance(scale, torch.Tensor):
+            scale = scale.cpu().numpy()
+        if isinstance(exponents, torch.Tensor):
+            exponents = exponents.cpu().numpy()
+        if isinstance(rotation, torch.Tensor):
+            rotation = rotation.cpu().numpy()
+        if isinstance(translation, torch.Tensor):
+            translation = translation.cpu().numpy()
+        if isinstance(tapering, torch.Tensor):
+            tapering = tapering.cpu().numpy()
+        if isinstance(bending, torch.Tensor):
+            bending = bending.cpu().numpy()
+        
+        # Determine bounding box based on object scale
+        max_scale = float(np.max(scale))
+        bounds = max_scale * 1.5
+        
+        # Create 3D grid of points centered at the superquadric's center (translation)
+        grid_1d = np.linspace(-bounds, bounds, resolution)
+        x_grid, y_grid, z_grid = np.meshgrid(grid_1d, grid_1d, grid_1d, indexing='ij')
+        points = np.stack([x_grid, y_grid, z_grid], axis=-1)  # (resolution, resolution, resolution, 3)
+        
+        # Offset grid to be centered at translation
+        points = points + translation[np.newaxis, np.newaxis, np.newaxis, :]
+        
+        # Flatten for batch processing
+        points_flat = points.reshape(-1, 3)  # (resolution^3, 3)
+        
+        # Build outdict for single primitive (batch_size=1, num_primitives=1)
+        outdict = {
+            'scale': torch.from_numpy(scale[np.newaxis, np.newaxis, :]).float().to(device),      # (1, 1, 3)
+            'shape': torch.from_numpy(exponents[np.newaxis, np.newaxis, :]).float().to(device),   # (1, 1, 2)
+            'rotate': torch.from_numpy(rotation[np.newaxis, np.newaxis, :, :]).float().to(device), # (1, 1, 3, 3)
+            'trans': torch.from_numpy(translation[np.newaxis, np.newaxis, :]).float().to(device),  # (1, 1, 3)
+            'tapering': torch.from_numpy(tapering[np.newaxis, np.newaxis, :]).float().to(device),  # (1, 1, 2)
+            'bending': torch.from_numpy(bending[np.newaxis, np.newaxis, :]).float().to(device),    # (1, 1, 6)
+            'exist': torch.ones((1, 1), dtype=torch.float32, device=device)  # (1, 1)
+        }
+        
+        # Evaluate SDF on grid using the same computation as in evaluation.py
+        points_t = torch.from_numpy(points_flat.astype(np.float32)).unsqueeze(0).to(device)  # (1, resolution^3, 3)
+        sdfs = sdfs_from_outdict(outdict, points_t, device=device)  # (1, 1, resolution^3)
+        
+        # Extract SDF values for the single primitive and reshape to 3D grid
+        sdf_values = sdfs[0, 0, :].cpu().numpy()
+        sdf_grid = sdf_values.reshape(resolution, resolution, resolution)
+        
+        # Run marching cubes to extract isosurface where SDF = 0
+        try:
+            vertices, faces, normals, values = measure.marching_cubes(sdf_grid, level=0.0)
+        except ValueError as e:
+            # If marching cubes fails (no isosurface found), return empty mesh
+            return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint32)
+        
+        # Scale vertices from grid indices to world coordinates
+        # Grid was centered at translation, so we need to account for that offset
+        grid_spacing = 2 * bounds / (resolution - 1)
+        vertices = vertices * grid_spacing - bounds + translation
+        
+        return vertices.astype(np.float32), faces.astype(np.uint32)

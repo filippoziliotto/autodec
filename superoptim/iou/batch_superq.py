@@ -97,11 +97,11 @@ class BatchSuperQMulti(nn.Module):
             if torch.count_nonzero(ben) == 0:
                 raw_ben = torch.full_like(ben, 1e-3)
                 raw_ben[..., 0::2] = torch.logit(raw_ben[..., 0::2])
+                raw_ben[..., 1::2] = torch.logit(raw_ben[..., 1::2])
             else:
-                tau = 0.01
-                max_scale = tau * torch.logsumexp(s / tau, dim=-1, keepdim=True)
                 raw_ben = torch.empty_like(ben)
-                raw_ben[..., 0::2] = torch.logit(torch.clamp((ben[..., 0::2] * max_scale) / 0.95, 1e-6, 1 - 1e-6))
+                min_radius = self._compute_min_radius(s, tap)
+                raw_ben[..., 0::2] = torch.logit(torch.clamp(ben[..., 0::2] * min_radius, 1e-6, 1 - 1e-6))
                 raw_ben[..., 1::2] = torch.logit(torch.clamp(ben[..., 1::2] / (2 * torch.pi), 1e-6, 1 - 1e-6))
             bending_list.append(raw_ben)
             
@@ -236,12 +236,44 @@ class BatchSuperQMulti(nn.Module):
     def tapering(self):
         return torch.tanh(self.raw_tapering)
     
-    @torch.compile
+    def _compute_min_radius(self, s, tap):
+        """Compute min_radius constraints for bending."""
+        s_x, s_y, s_z = s[..., 0:1], s[..., 1:2], s[..., 2:3]
+        
+        # Apply tapering to effective scales
+        if self.enable_tapering:
+            s_x_eff = s_x * (1 + torch.abs(tap[..., 0:1]))
+            s_y_eff = s_y * (1 + torch.abs(tap[..., 1:2]))
+            s_z_eff = s_z
+        else:
+            s_x_eff, s_y_eff, s_z_eff = s_x, s_y, s_z
+        
+        # Thickness Constraint
+        t_x = torch.amax(torch.cat([s_y_eff, s_z_eff], dim=-1), dim=-1, keepdim=True)
+        t_y = torch.amax(torch.cat([s_x_eff, s_z_eff], dim=-1), dim=-1, keepdim=True)
+        t_z = torch.amax(torch.cat([s_x_eff, s_y_eff], dim=-1), dim=-1, keepdim=True)
+        thickness_limit = torch.cat([t_x, t_y, t_z], dim=-1)
+        
+        # Global Loop Constraint (Circumference > Length)
+        loop_limit = torch.cat([s_x_eff, s_y_eff, s_z_eff], dim=-1) / torch.pi
+        
+        min_radius_xyz = torch.maximum(thickness_limit, loop_limit)
+        
+        # Reorder to (z, x, y) for bending channels
+        min_radius = torch.cat([
+            min_radius_xyz[..., 2:3],
+            min_radius_xyz[..., 0:1],
+            min_radius_xyz[..., 1:2],
+        ], dim=-1)
+        
+        return min_radius
+    
     def bending(self):
-        # not accurate limit, but safe
-        tau = 0.01
-        max_scale = tau * torch.logsumexp(self.scale()/tau, keepdim=True, dim=-1)
-        kb = (torch.sigmoid(self.raw_bending[..., 0::2]) * 0.95) / max_scale 
+        s = self.scale()#.detach()
+        t = self.tapering()#.detach()
+        
+        min_radius = self._compute_min_radius(s, t)
+        kb = torch.sigmoid(self.raw_bending[..., 0::2]) / min_radius
         alpha = torch.sigmoid(self.raw_bending[..., 1::2]) * 2 * torch.pi
         return kb, alpha
     
@@ -347,7 +379,14 @@ class BatchSuperQMulti(nn.Module):
         f_func = safe_pow(safe_pow(term1 + term2, e2 / e1) + term3, -e1 / 2)
         
         sdf = safe_mul(r0, (1 - f_func))
-        # sdf = (1 - f_func)
+        
+        # Enforce proper distance growth outside the primitive:
+        # SDF should be at least r0 - radius_approx (linear growth outside bounding sphere)
+        # This prevents tiny primitives from generating incorrect near-zero SDF values
+        radius = torch.sqrt(sx.squeeze(-1)**2 + sy.squeeze(-1)**2 + sz.squeeze(-1)**2)  # (B, N)
+        floor = r0 - radius.unsqueeze(-1)
+        sdf = torch.where(floor > sdf, floor, sdf)
+
         return sdf
     
     @torch.compile
@@ -415,13 +454,13 @@ class BatchSuperQMulti(nn.Module):
         L_overlap = 1e-1 * overlap.mean(dim=1)
         
         loss = -torch.log(iou) + self.w_sdf * Lsdf + self.w_bbox * L_bbox + self.w_overlap * L_overlap
-        return loss, iou, Lsdf, L_overlap, L_overlap
+        return loss, iou, Lsdf, L_bbox, L_overlap
     
     def compute_losses(self, forward_out):
         sdfs = forward_out.get('sdfs')
         overlap = forward_out.get('overlap')
-        loss, iou, Lsdf, L_overlap, L_overlap = self._compute_losses(sdfs, overlap)
-        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_overlap, "overlap": L_overlap}
+        loss, iou, Lsdf, L_bbox, L_overlap = self._compute_losses(sdfs, overlap)
+        return loss, {"iou": iou, "sdf": Lsdf, "bbox": L_bbox, "overlap": L_overlap}
 
     def forward(self):
         all_sdfs = self.sdf_batch(self.points.transpose(1, 2).contiguous()) # (B, N, M_total)
