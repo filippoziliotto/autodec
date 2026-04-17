@@ -4,7 +4,11 @@ from pathlib import Path
 
 import torch
 
-from autodec.visualizations.pointcloud import points_to_numpy, write_point_cloud_ply
+from autodec.visualizations.pointcloud import (
+    points_to_numpy,
+    read_point_cloud_ply,
+    write_point_cloud_ply,
+)
 from autodec.visualizations.sq_mesh import export_sq_mesh
 
 
@@ -102,7 +106,7 @@ class AutoDecEpochVisualizer:
             sample_dir.mkdir(parents=True, exist_ok=True)
 
             input_path = sample_dir / "input_gt.ply"
-            sq_mesh_path = sample_dir / "sq_mesh.ply"
+            sq_mesh_path = sample_dir / "sq_mesh.obj"
             reconstruction_path = sample_dir / "reconstruction.ply"
             metadata_path = sample_dir / "metadata.json"
 
@@ -152,6 +156,8 @@ class AutoDecEpochVisualizer:
 def _default_object3d_factory(path):
     import wandb
 
+    if Path(path).suffix.lower() == ".ply":
+        return wandb.Object3D(read_point_cloud_ply(path))
     return wandb.Object3D(str(path))
 
 

@@ -133,6 +133,19 @@ def _write_mesh_ply(path, mesh):
             handle.write(f"{line}\n")
 
 
+def _write_mesh_obj(path, mesh):
+    vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+
+    with Path(path).open("w", encoding="utf-8") as handle:
+        handle.write("# AutoDec superquadric scaffold\n")
+        for vertex in vertices:
+            handle.write(f"v {vertex[0]:.8f} {vertex[1]:.8f} {vertex[2]:.8f}\n")
+        for face in faces:
+            # OBJ indices are 1-based.
+            handle.write(f"f {face[0] + 1} {face[1] + 1} {face[2] + 1}\n")
+
+
 def export_sq_mesh(path, outdict, sample_index=0, resolution=24, exist_threshold=0.5):
     """Export active predicted superquadrics as a mesh."""
 
@@ -146,6 +159,8 @@ def export_sq_mesh(path, outdict, sample_index=0, resolution=24, exist_threshold
     )
     if path.suffix.lower() == ".ply":
         _write_mesh_ply(path, mesh)
+    elif path.suffix.lower() == ".obj":
+        _write_mesh_obj(path, mesh)
     else:
         mesh.export(path, file_type=path.suffix.lstrip(".") or "ply")
     return path

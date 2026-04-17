@@ -16,7 +16,7 @@ writer creates:
 ```text
 data/viz/autodec_phase1/val/epoch_0003/sample_0000/
   input_gt.ply
-  sq_mesh.ply
+  sq_mesh.obj
   reconstruction.ply
   metadata.json
 ```
@@ -112,7 +112,7 @@ records = visualizer.write_epoch(
 This writes:
 
 - `input_gt.ply`: the input or target point cloud.
-- `sq_mesh.ply`: the active predicted superquadric scaffold as a mesh.
+- `sq_mesh.obj`: the active predicted superquadric scaffold as a mesh.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
 - `metadata.json`: epoch, split, sample index, point counts, active primitive count.
 
@@ -134,7 +134,8 @@ visual/reconstruction
 
 Each value is a list of `wandb.Object3D` objects. The function imports WandB
 lazily, so the rest of the visualization package can be used without an active
-WandB run.
+WandB run. WandB does not accept PLY file paths for `Object3D`, so point-cloud
+PLY files are converted to `[N, 6]` arrays before logging.
 
 ### `log_wandb_visualizations`
 
@@ -215,10 +216,11 @@ Writes the mesh to disk:
 
 ```python
 export_sq_mesh(
-    "data/viz/run/val/epoch_0001/sample_0000/sq_mesh.ply",
+    "data/viz/run/val/epoch_0001/sample_0000/sq_mesh.obj",
     outdict,
 )
 ```
 
-The current epoch visualizer writes mesh PLY to avoid the `trimesh` GLB exporter
-path, which is not compatible with NumPy 2 in some cluster environments.
+The current epoch visualizer writes mesh OBJ to avoid the `trimesh` GLB exporter
+path, which is not compatible with NumPy 2 in some cluster environments, while
+still using a mesh file type accepted by WandB `Object3D`.

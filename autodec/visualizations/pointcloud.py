@@ -73,3 +73,51 @@ def write_point_cloud_ply(path, points, color=(210, 210, 210), sample_index=0, m
                 f"{int(color_row[0])} {int(color_row[1])} {int(color_row[2])}\n"
             )
     return path
+
+
+def read_point_cloud_ply(path):
+    """Read an ASCII PLY point cloud written by `write_point_cloud_ply` as [N, 6]."""
+
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as handle:
+        line = handle.readline().strip()
+        if line != "ply":
+            raise ValueError(f"{path} is not a PLY file")
+
+        vertex_count = None
+        properties = []
+        in_vertex = False
+        for line in handle:
+            line = line.strip()
+            if line == "end_header":
+                break
+            if line.startswith("element vertex "):
+                vertex_count = int(line.split()[-1])
+                in_vertex = True
+                continue
+            if line.startswith("element "):
+                in_vertex = False
+                continue
+            if in_vertex and line.startswith("property "):
+                properties.append(line.split()[-1])
+
+        if vertex_count is None:
+            raise ValueError(f"{path} has no vertex element")
+
+        rows = []
+        for _ in range(vertex_count):
+            values = handle.readline().split()
+            if not values:
+                break
+            row = {name: values[idx] for idx, name in enumerate(properties)}
+            rows.append(
+                [
+                    float(row["x"]),
+                    float(row["y"]),
+                    float(row["z"]),
+                    float(row.get("red", 180)),
+                    float(row.get("green", 180)),
+                    float(row.get("blue", 180)),
+                ]
+            )
+    return np.asarray(rows, dtype=np.float32)

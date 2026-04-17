@@ -1,4 +1,6 @@
 import json
+import sys
+from types import SimpleNamespace
 
 import torch
 
@@ -62,7 +64,7 @@ def test_epoch_visualizer_writes_gt_sq_mesh_and_reconstruction(tmp_path):
     assert record.metadata_path.exists()
     assert record.input_path.name == "input_gt.ply"
     assert record.reconstruction_path.name == "reconstruction.ply"
-    assert record.sq_mesh_path.name == "sq_mesh.ply"
+    assert record.sq_mesh_path.name == "sq_mesh.obj"
 
     metadata = json.loads(record.metadata_path.read_text())
     assert metadata["epoch"] == 3
@@ -100,10 +102,43 @@ def test_build_wandb_log_returns_expected_visual_keys(tmp_path):
 
     assert payload == {
         "visual/gt": ["object:input_gt.ply"],
-        "visual/sq_mesh": ["object:sq_mesh.ply"],
+        "visual/sq_mesh": ["object:sq_mesh.obj"],
         "visual/reconstruction": ["object:reconstruction.ply"],
     }
-    assert seen == ["input_gt.ply", "sq_mesh.ply", "reconstruction.ply"]
+    assert seen == ["input_gt.ply", "sq_mesh.obj", "reconstruction.ply"]
+
+
+def test_default_wandb_log_converts_point_cloud_ply_to_arrays(tmp_path, monkeypatch):
+    from autodec.visualizations import AutoDecEpochVisualizer, build_wandb_log
+
+    captured = []
+
+    class FakeObject3D:
+        def __init__(self, value):
+            captured.append(value)
+
+    monkeypatch.setitem(sys.modules, "wandb", SimpleNamespace(Object3D=FakeObject3D))
+
+    visualizer = AutoDecEpochVisualizer(
+        root_dir=tmp_path,
+        run_name="debug_run",
+        mesh_resolution=6,
+        max_points=None,
+    )
+    records = visualizer.write_epoch(
+        batch=_batch(),
+        outdict=_outdict(),
+        epoch=0,
+        split="val",
+        num_samples=1,
+    )
+
+    payload = build_wandb_log(records)
+
+    assert set(payload) == {"visual/gt", "visual/sq_mesh", "visual/reconstruction"}
+    assert captured[0].shape == (3, 6)
+    assert captured[1].endswith("sq_mesh.obj")
+    assert captured[2].shape == (3, 6)
 
 
 def test_visualizations_folder_has_same_name_documentation():
