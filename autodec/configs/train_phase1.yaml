@@ -93,6 +93,9 @@ trainer:
   batch_size: 4
   num_workers: 4
   augmentations: true
+  occlusions: false
+  force_occlusions: false
+  new_camera_sample: false
 
 optimizer:
   phase: 1
