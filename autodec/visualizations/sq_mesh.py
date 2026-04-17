@@ -134,14 +134,45 @@ def _write_mesh_ply(path, mesh):
 
 
 def _write_mesh_obj(path, mesh):
+    path = Path(path)
     vertices = np.asarray(mesh.vertices, dtype=np.float32)
     faces = np.asarray(mesh.faces, dtype=np.int64)
+    face_colors = np.asarray(getattr(mesh.visual, "face_colors", []), dtype=np.uint8)
+    has_face_colors = face_colors.shape[0] == faces.shape[0] and face_colors.shape[1] >= 3
+    material_by_color = {}
+    materials = []
+    if has_face_colors:
+        for color in face_colors:
+            key = tuple(int(channel) for channel in color[:4])
+            if key not in material_by_color:
+                material_by_color[key] = f"primitive_{len(materials):04d}"
+                materials.append((material_by_color[key], key))
+
+    if materials:
+        mtl_path = path.with_suffix(".mtl")
+        with mtl_path.open("w", encoding="utf-8") as handle:
+            handle.write("# AutoDec superquadric scaffold materials\n")
+            for name, color in materials:
+                red, green, blue = (channel / 255.0 for channel in color[:3])
+                alpha = color[3] / 255.0 if len(color) > 3 else 1.0
+                handle.write(f"newmtl {name}\n")
+                handle.write(f"Kd {red:.6f} {green:.6f} {blue:.6f}\n")
+                handle.write(f"d {alpha:.6f}\n\n")
 
     with Path(path).open("w", encoding="utf-8") as handle:
         handle.write("# AutoDec superquadric scaffold\n")
+        if materials:
+            handle.write(f"mtllib {path.with_suffix('.mtl').name}\n")
         for vertex in vertices:
             handle.write(f"v {vertex[0]:.8f} {vertex[1]:.8f} {vertex[2]:.8f}\n")
-        for face in faces:
+        current_material = None
+        for face_idx, face in enumerate(faces):
+            if has_face_colors:
+                key = tuple(int(channel) for channel in face_colors[face_idx, :4])
+                material = material_by_color[key]
+                if material != current_material:
+                    handle.write(f"usemtl {material}\n")
+                    current_material = material
             # OBJ indices are 1-based.
             handle.write(f"f {face[0] + 1} {face[1] + 1} {face[2] + 1}\n")
 

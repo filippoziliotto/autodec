@@ -113,6 +113,8 @@ This writes:
 
 - `input_gt.ply`: the input or target point cloud.
 - `sq_mesh.obj`: the active predicted superquadric scaffold as a mesh.
+- `sq_mesh.mtl`: material colors for the scaffold, one material per active
+  primitive color group.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
 - `metadata.json`: epoch, split, sample index, point counts, active primitive count.
 
@@ -223,4 +225,6 @@ export_sq_mesh(
 
 The current epoch visualizer writes mesh OBJ to avoid the `trimesh` GLB exporter
 path, which is not compatible with NumPy 2 in some cluster environments, while
-still using a mesh file type accepted by WandB `Object3D`.
+still using a mesh file type accepted by WandB `Object3D`. The OBJ references a
+same-directory `.mtl` file with deterministic diffuse materials derived from
+the primitive index, so active superquadrics render with different colors.

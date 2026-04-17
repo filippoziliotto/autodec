@@ -38,6 +38,16 @@ def _outdict():
     }
 
 
+def _two_primitive_outdict():
+    outdict = _outdict()
+    outdict["scale"] = torch.ones(1, 2, 3)
+    outdict["shape"] = torch.ones(1, 2, 2)
+    outdict["rotate"] = torch.eye(3).view(1, 1, 3, 3).repeat(1, 2, 1, 1)
+    outdict["trans"] = torch.tensor([[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]])
+    outdict["exist"] = torch.ones(1, 2, 1)
+    return outdict
+
+
 def test_epoch_visualizer_writes_gt_sq_mesh_and_reconstruction(tmp_path):
     from autodec.visualizations import AutoDecEpochVisualizer
 
@@ -139,6 +149,24 @@ def test_default_wandb_log_converts_point_cloud_ply_to_arrays(tmp_path, monkeypa
     assert captured[0].shape == (3, 6)
     assert captured[1].endswith("sq_mesh.obj")
     assert captured[2].shape == (3, 6)
+
+
+def test_sq_mesh_export_assigns_distinct_materials_per_primitive(tmp_path):
+    from autodec.visualizations.sq_mesh import export_sq_mesh
+
+    path = tmp_path / "sq_mesh.obj"
+
+    export_sq_mesh(path, _two_primitive_outdict(), resolution=6)
+
+    obj_text = path.read_text()
+    mtl_text = path.with_suffix(".mtl").read_text()
+    assert "mtllib sq_mesh.mtl" in obj_text
+    assert "usemtl primitive_0000" in obj_text
+    assert "usemtl primitive_0001" in obj_text
+    assert "newmtl primitive_0000" in mtl_text
+    assert "newmtl primitive_0001" in mtl_text
+    assert "Kd 0.901961 0.223529 0.274510" in mtl_text
+    assert "Kd 0.113725 0.207843 0.341176" in mtl_text
 
 
 def test_visualizations_folder_has_same_name_documentation():
