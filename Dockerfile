@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV FORCE_CUDA=1
-ENV TORCH_EXTENSIONS_DIR=/opt/torch_extensions
+ENV TORCH_EXTENSIONS_DIR=/workspace/superdec/.torch_extensions
 ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -132,7 +132,8 @@ COPY . /workspace/superdec
 
 RUN mkdir -p "${TORCH_EXTENSIONS_DIR}" data checkpoints outputs wandb logs && \
     conda run -n superdec python -m pip install --no-deps -e . && \
-    conda run -n superdec python setup_sampler.py build_ext --inplace
+    conda run -n superdec python setup_sampler.py build_ext --inplace && \
+    chmod -R a+rwX "${TORCH_EXTENSIONS_DIR}" data checkpoints outputs wandb logs
 
 # To use "conda activate" in interactive bash.
 RUN echo ". /opt/conda/etc/profile.d/conda.sh" >> /root/.bashrc && \

@@ -6,6 +6,7 @@ the repository root or from any other working directory.
 Files:
 
 ```text
+common.sh
 run_smoke.sh
 run_phase1.sh
 run_phase2.sh
@@ -18,8 +19,34 @@ All scripts:
 - enable `set -euo pipefail`;
 - resolve the repository root from the script location;
 - `cd` to the repository root before launching Python;
+- call `ensure_fast_sampler` before training, so the SuperDec Cython/C++
+  sampler is rebuilt when a bind-mounted repo hides the compiled extension;
 - forward all extra command-line arguments with `"$@"`, so Hydra overrides can
   be appended at invocation time.
+
+## `common.sh`
+
+Shared shell helpers for the AutoDec launch scripts.
+
+### `ensure_fast_sampler`
+
+Checks whether Python can resolve:
+
+```text
+superdec.fast_sampler._sampler
+```
+
+If the extension is available, the function returns immediately. If not, it
+runs:
+
+```bash
+python setup_sampler.py build_ext --inplace
+```
+
+This extension is required by `superdec.loss.sampler.EqualDistanceSamplerSQ`.
+Docker images may already contain the compiled `.so`, but mounting the repo from
+the host can hide that build artifact. Rebuilding on demand keeps the phase
+scripts usable in normal local environments and bind-mounted container runs.
 
 ## `run_smoke.sh`
 
@@ -111,4 +138,3 @@ Useful override example:
 ```bash
 bash autodec/scripts/run_phase2.sh checkpoints.resume_from=checkpoints/autodec_phase1/epoch_10.pt
 ```
-

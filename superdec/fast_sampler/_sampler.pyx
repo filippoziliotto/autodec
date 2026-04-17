@@ -428,12 +428,14 @@ def fast_sample_on_batch(
         np.zeros((B, M, N), dtype=np.float32)
     cdef cnp.ndarray[cnp.float32_t, ndim=3] omegas = \
         np.zeros((B, M, N), dtype=np.float32)
+    cdef float[:, :, ::1] etas_view = etas
+    cdef float[:, :, ::1] omegas_view = omegas
     with nogil:
         sample_on_batch(
             &shapes[0, 0, 0],
             &epsilons[0, 0, 0],
-            <float *>etas.data,
-            <float *>omegas.data,
+            &etas_view[0, 0, 0],
+            &omegas_view[0, 0, 0],
             B, M, N,
             buffer_size,
             0
