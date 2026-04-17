@@ -62,7 +62,7 @@ def test_epoch_visualizer_writes_gt_sq_mesh_and_reconstruction(tmp_path):
     assert record.metadata_path.exists()
     assert record.input_path.name == "input_gt.ply"
     assert record.reconstruction_path.name == "reconstruction.ply"
-    assert record.sq_mesh_path.name == "sq_mesh.glb"
+    assert record.sq_mesh_path.name == "sq_mesh.ply"
 
     metadata = json.loads(record.metadata_path.read_text())
     assert metadata["epoch"] == 3
@@ -100,10 +100,10 @@ def test_build_wandb_log_returns_expected_visual_keys(tmp_path):
 
     assert payload == {
         "visual/gt": ["object:input_gt.ply"],
-        "visual/sq_mesh": ["object:sq_mesh.glb"],
+        "visual/sq_mesh": ["object:sq_mesh.ply"],
         "visual/reconstruction": ["object:reconstruction.ply"],
     }
-    assert seen == ["input_gt.ply", "sq_mesh.glb", "reconstruction.ply"]
+    assert seen == ["input_gt.ply", "sq_mesh.ply", "reconstruction.ply"]
 
 
 def test_visualizations_folder_has_same_name_documentation():

@@ -102,7 +102,7 @@ class AutoDecEpochVisualizer:
             sample_dir.mkdir(parents=True, exist_ok=True)
 
             input_path = sample_dir / "input_gt.ply"
-            sq_mesh_path = sample_dir / "sq_mesh.glb"
+            sq_mesh_path = sample_dir / "sq_mesh.ply"
             reconstruction_path = sample_dir / "reconstruction.ply"
             metadata_path = sample_dir / "metadata.json"
 

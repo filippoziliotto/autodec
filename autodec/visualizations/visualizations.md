@@ -16,7 +16,7 @@ writer creates:
 ```text
 data/viz/autodec_phase1/val/epoch_0003/sample_0000/
   input_gt.ply
-  sq_mesh.glb
+  sq_mesh.ply
   reconstruction.ply
   metadata.json
 ```
@@ -112,7 +112,7 @@ records = visualizer.write_epoch(
 This writes:
 
 - `input_gt.ply`: the input or target point cloud.
-- `sq_mesh.glb`: the active predicted superquadric scaffold as a mesh.
+- `sq_mesh.ply`: the active predicted superquadric scaffold as a mesh.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
 - `metadata.json`: epoch, split, sample index, point counts, active primitive count.
 
@@ -215,10 +215,10 @@ Writes the mesh to disk:
 
 ```python
 export_sq_mesh(
-    "data/viz/run/val/epoch_0001/sample_0000/sq_mesh.glb",
+    "data/viz/run/val/epoch_0001/sample_0000/sq_mesh.ply",
     outdict,
 )
 ```
 
-The current epoch visualizer writes GLB because WandB and browsers usually
-handle it better than raw mesh PLY.
+The current epoch visualizer writes mesh PLY to avoid the `trimesh` GLB exporter
+path, which is not compatible with NumPy 2 in some cluster environments.

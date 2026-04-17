@@ -10,6 +10,7 @@ common.sh
 run_smoke.sh
 run_phase1.sh
 run_phase2.sh
+run_all.sh
 scripts.md
 ```
 
@@ -137,4 +138,21 @@ Useful override example:
 
 ```bash
 bash autodec/scripts/run_phase2.sh checkpoints.resume_from=checkpoints/autodec_phase1/epoch_10.pt
+```
+
+## `run_all.sh`
+
+Runs the two standard training phases sequentially:
+
+```bash
+bash autodec/scripts/run_phase1.sh "$@"
+bash autodec/scripts/run_phase2.sh "$@"
+```
+
+Because the script uses `set -euo pipefail`, phase 2 starts only if phase 1
+exits successfully. Extra command-line arguments are forwarded to both phases,
+which is useful for shared overrides such as:
+
+```bash
+bash autodec/scripts/run_all.sh use_wandb=true wandb.project=autodec
 ```

@@ -100,8 +100,41 @@ def build_sq_mesh(outdict, sample_index=0, resolution=24, exist_threshold=0.5):
     return trimesh.util.concatenate(meshes)
 
 
+def _write_mesh_ply(path, mesh):
+    vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    face_colors = np.asarray(getattr(mesh.visual, "face_colors", []), dtype=np.uint8)
+    has_face_colors = face_colors.shape[0] == faces.shape[0] and face_colors.shape[1] >= 3
+
+    with Path(path).open("w", encoding="utf-8") as handle:
+        handle.write("ply\n")
+        handle.write("format ascii 1.0\n")
+        handle.write(f"element vertex {vertices.shape[0]}\n")
+        handle.write("property float x\n")
+        handle.write("property float y\n")
+        handle.write("property float z\n")
+        handle.write(f"element face {faces.shape[0]}\n")
+        handle.write("property list uchar int vertex_indices\n")
+        if has_face_colors:
+            handle.write("property uchar red\n")
+            handle.write("property uchar green\n")
+            handle.write("property uchar blue\n")
+            handle.write("property uchar alpha\n")
+        handle.write("end_header\n")
+
+        for vertex in vertices:
+            handle.write(f"{vertex[0]:.8f} {vertex[1]:.8f} {vertex[2]:.8f}\n")
+        for face_idx, face in enumerate(faces):
+            line = f"3 {face[0]} {face[1]} {face[2]}"
+            if has_face_colors:
+                color = face_colors[face_idx]
+                alpha = color[3] if color.shape[0] > 3 else 255
+                line += f" {color[0]} {color[1]} {color[2]} {alpha}"
+            handle.write(f"{line}\n")
+
+
 def export_sq_mesh(path, outdict, sample_index=0, resolution=24, exist_threshold=0.5):
-    """Export active predicted superquadrics as a GLB mesh."""
+    """Export active predicted superquadrics as a mesh."""
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,5 +144,8 @@ def export_sq_mesh(path, outdict, sample_index=0, resolution=24, exist_threshold
         resolution=resolution,
         exist_threshold=exist_threshold,
     )
-    mesh.export(path, file_type=path.suffix.lstrip(".") or "glb")
+    if path.suffix.lower() == ".ply":
+        _write_mesh_ply(path, mesh)
+    else:
+        mesh.export(path, file_type=path.suffix.lstrip(".") or "ply")
     return path

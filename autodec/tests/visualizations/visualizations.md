@@ -14,7 +14,7 @@ Creates one tiny batch and one tiny AutoDec output dictionary.
 Checks that `AutoDecEpochVisualizer.write_epoch` writes:
 
 - `input_gt.ply`
-- `sq_mesh.glb`
+- `sq_mesh.ply`
 - `reconstruction.ply`
 - `metadata.json`
 
