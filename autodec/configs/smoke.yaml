@@ -1,0 +1,115 @@
+seed: 42
+run_name: autodec_smoke
+dataset: shapenet
+device: cuda
+use_wandb: false
+
+wandb:
+  project: autodec
+  api_key_env: WANDB_API_KEY
+
+visualization:
+  enabled: true
+  root_dir: data/viz
+  every_n_epochs: 1
+  num_samples: 1
+  split: val
+  log_to_wandb: true
+  mesh_resolution: 8
+  exist_threshold: 0.5
+  max_points: 128
+
+checkpoints:
+  encoder_from: null
+  resume_from: null
+  keep_epoch: false
+  strict_encoder: true
+
+autodec:
+  residual_dim: 16
+  primitive_dim: 18
+  n_surface_samples: 16
+  exist_tau: 1.0
+  encoder:
+    decoder:
+      n_queries: 4
+      n_layers: 1
+      n_heads: 1
+      masked_attention: false
+      swapped_attention: false
+      dim_feedforward: 64
+      deep_supervision: false
+      pos_encoding_type: sinusoidal
+    point_encoder:
+      in_channels: 3
+      out_channels: 32
+      kernel_size: 3
+      resolution: 16
+      voxelization:
+        normalize: true
+        eps: 0
+      l1:
+        in_channels: 3
+        out_channels: 32
+        kernel_size: 3
+        resolution: 16
+        voxelization:
+          normalize: true
+          eps: 0
+      l2:
+        in_channels: 32
+        out_channels: 32
+        kernel_size: 3
+        resolution: 8
+        voxelization:
+          normalize: true
+          eps: 0
+      l3:
+        in_channels: 32
+        out_channels: 32
+        kernel_size: 3
+        resolution: 8
+        voxelization:
+          normalize: true
+          eps: 0
+  decoder:
+    hidden_dim: 32
+    n_heads: 4
+    offset_scale: null
+
+shapenet:
+  path: data/ShapeNet
+  categories: ["03001627"]
+  normalize: false
+  max_train_items: 8
+  max_val_items: 4
+  subset_seed: 42
+
+trainer:
+  save_path: checkpoints
+  save_every_n_epochs: 1
+  evaluate_every_n_epochs: 1
+  num_epochs: 1
+  batch_size: 1
+  num_workers: 0
+  augmentations: false
+
+optimizer:
+  phase: 1
+  lr: 1e-4
+  decoder_lr: 1e-4
+  encoder_lr: 1e-5
+  residual_lr: 1e-4
+  weight_decay: 0
+  betas: [0.9, 0.999]
+  enable_scheduler: false
+
+loss:
+  type: autodec
+  phase: 1
+  lambda_sq: 0.0
+  lambda_par: 0.0
+  lambda_exist: 0.0
+  lambda_cons: 0.0
+  n_sq_samples: 16
+  min_backward_weight: 1e-3

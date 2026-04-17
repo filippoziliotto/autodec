@@ -1,0 +1,43 @@
+.git
+.gitignore
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+.venv*
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+
+# Local/generated Python extension artifacts are rebuilt in the image.
+build
+*.so
+*.o
+superdec/fast_sampler/_sampler.cpp
+
+# Large runtime artifacts should be bind-mounted instead of baked into the image.
+data
+checkpoints
+outputs
+result
+results
+logs
+wandb
+tmp
+
+# Local secrets and machine-specific files.
+autodec/keys/keys.sh
+*.local.yaml
+
+# Large experiment/media outputs.
+*.pt
+*.pth
+*.ply
+*.npz
+*.npy
+*.mp4
+*.mov
+*.glb
+*.obj
+*.off
