@@ -1,0 +1,108 @@
+seed: 0
+run_name: autodec_test_eval
+dataset: shapenet
+device: cuda
+use_wandb: false
+
+wandb:
+  project: autodec
+  api_key_env: WANDB_API_KEY
+
+checkpoints:
+  encoder_from: null
+  resume_from: checkpoints/autodec_phase2/epoch_200.pt
+  strict_encoder: true
+
+autodec:
+  residual_dim: 64
+  primitive_dim: 18
+  n_surface_samples: 256
+  exist_tau: 1.0
+  encoder:
+    decoder:
+      n_queries: 16
+      n_layers: 3
+      n_heads: 1
+      masked_attention: false
+      swapped_attention: false
+      dim_feedforward: 512
+      deep_supervision: false
+      pos_encoding_type: sinusoidal
+    point_encoder:
+      in_channels: 3
+      out_channels: 128
+      kernel_size: 3
+      resolution: 32
+      voxelization:
+        normalize: true
+        eps: 0
+      l1:
+        in_channels: 3
+        out_channels: 64
+        kernel_size: 3
+        resolution: 32
+        voxelization:
+          normalize: true
+          eps: 0
+      l2:
+        in_channels: 64
+        out_channels: 128
+        kernel_size: 3
+        resolution: 16
+        voxelization:
+          normalize: true
+          eps: 0
+      l3:
+        in_channels: 128
+        out_channels: 128
+        kernel_size: 3
+        resolution: 16
+        voxelization:
+          normalize: true
+          eps: 0
+  decoder:
+    hidden_dim: 128
+    n_heads: 4
+    offset_scale: null
+
+shapenet:
+  path: data/ShapeNet
+  categories: null
+  normalize: false
+  batch_size: 8
+  num_workers: 4
+
+trainer:
+  augmentations: false
+  occlusions: false
+  force_occlusions: false
+  new_camera_sample: false
+
+eval:
+  split: test
+  output_dir: data/eval
+  max_batches: null
+  compute_loss_metrics: true
+  compute_paper_metrics: true
+
+visualization:
+  enabled: true
+  output_dir: data/eval
+  num_samples: 20
+  min_categories: 5
+  samples_per_category: 4
+  log_to_wandb: false
+  mesh_resolution: 24
+  exist_threshold: 0.5
+  max_points: 4096
+
+loss:
+  type: autodec
+  phase: 2
+  lambda_sq: 1.0
+  lambda_par: 0.06
+  lambda_exist: 0.01
+  lambda_cons: 0.0
+  n_sq_samples: 256
+  min_backward_weight: 1e-3
+

@@ -11,6 +11,7 @@ run_smoke.sh
 run_phase1.sh
 run_phase2.sh
 run_all.sh
+run_eval_test.sh
 scripts.md
 ```
 
@@ -20,7 +21,7 @@ All scripts:
 - enable `set -euo pipefail`;
 - resolve the repository root from the script location;
 - `cd` to the repository root before launching Python;
-- call `ensure_fast_sampler` before training, so the SuperDec Cython/C++
+- call `ensure_fast_sampler` before training/evaluation, so the SuperDec Cython/C++
   sampler is rebuilt when a bind-mounted repo hides the compiled extension;
 - forward all extra command-line arguments with `"$@"`, so Hydra overrides can
   be appended at invocation time.
@@ -155,4 +156,40 @@ which is useful for shared overrides such as:
 
 ```bash
 bash autodec/scripts/run_all.sh use_wandb=true wandb.project=autodec
+```
+
+## `run_eval_test.sh`
+
+Command:
+
+```bash
+python -m autodec.eval.run --config-name eval_test "$@"
+```
+
+Purpose:
+
+Run standalone AutoDec evaluation on the ShapeNet `test` split:
+
+```text
+autodec/configs/eval_test.yaml
+```
+
+The script loads a full AutoDec checkpoint, computes test metrics, writes
+`metrics.json` and `per_sample_metrics.jsonl`, and exports the configured 3D
+visualizations under `data/eval/<run_name>/`.
+
+Expected use:
+
+```bash
+bash autodec/scripts/run_eval_test.sh checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt
+```
+
+Useful all-category WandB example:
+
+```bash
+bash autodec/scripts/run_eval_test.sh \
+  checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt \
+  shapenet.categories=null \
+  use_wandb=true \
+  wandb.project=autodec
 ```

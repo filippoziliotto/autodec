@@ -19,6 +19,17 @@ def test_phase_scripts_call_autodec_training_entrypoint():
         assert '"$@"' in content
 
 
+def test_eval_script_calls_autodec_eval_entrypoint():
+    script = Path("autodec/scripts/run_eval_test.sh")
+    content = script.read_text()
+
+    assert content.startswith("#!/usr/bin/env bash")
+    assert "ensure_fast_sampler" in content
+    assert "python -m autodec.eval.run" in content
+    assert "--config-name eval_test" in content
+    assert '"$@"' in content
+
+
 def test_scripts_folder_has_same_name_documentation():
     doc = Path("autodec/scripts/scripts.md")
 
@@ -26,5 +37,7 @@ def test_scripts_folder_has_same_name_documentation():
 
     assert "run_phase1.sh" in content
     assert "run_phase2.sh" in content
+    assert "run_eval_test.sh" in content
     assert "train_phase1" in content
     assert "train_phase2" in content
+    assert "eval_test" in content

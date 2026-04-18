@@ -10,6 +10,7 @@ Files:
 smoke.yaml
 train_phase1.yaml
 train_phase2.yaml
+eval_test.yaml
 ```
 
 The AutoDec training entrypoint is:
@@ -18,7 +19,13 @@ The AutoDec training entrypoint is:
 python -m autodec.training.train
 ```
 
-and uses this folder as its Hydra config path.
+The AutoDec test-evaluation entrypoint is:
+
+```bash
+python -m autodec.eval.run
+```
+
+Both use this folder as their Hydra config path.
 
 ## Shared Structure
 
@@ -39,6 +46,10 @@ trainer
 optimizer
 loss
 ```
+
+`eval_test.yaml` replaces training-only optimizer/scheduler fields with an
+`eval` section and uses `shapenet.categories: null` by default so the
+category-balanced visualization selector can cover at least five categories.
 
 ### `checkpoints`
 
@@ -114,9 +125,25 @@ The files are:
 
 ```text
 input_gt.ply
-sq_mesh.glb
+sq_mesh.obj
 reconstruction.ply
 metadata.json
+```
+
+For `eval_test.yaml`, the visualization output root defaults to:
+
+```text
+data/eval/<run_name>/<split>/epoch_0000/sample_xxxx/
+```
+
+The eval metadata also includes:
+
+```text
+category
+model_id
+dataset_index
+checkpoint
+metrics
 ```
 
 ### `autodec`
@@ -219,6 +246,32 @@ encoder backbone
 encoder residual projector
 decoder
 ```
+
+### `eval`
+
+Only `eval_test.yaml` has this section.
+
+Fields:
+
+```text
+split
+output_dir
+max_batches
+compute_loss_metrics
+compute_paper_metrics
+```
+
+`split` defaults to `test`. `output_dir` defaults to `data/eval`, and the
+evaluator writes:
+
+```text
+data/eval/<run_name>/metrics.json
+data/eval/<run_name>/per_sample_metrics.jsonl
+```
+
+`compute_loss_metrics` enables the same scalar loss metrics used in training.
+`compute_paper_metrics` enables symmetric Chamfer-L1 and Chamfer-L2 metrics for
+paper-style reporting.
 
 with differential learning rates.
 
