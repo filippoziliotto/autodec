@@ -199,6 +199,8 @@ build_offset_decoder(
     primitive_in_dim=8,
     hidden_dim=12,
     n_heads=3,
+    n_blocks=2,
+    self_attention_mode="within_primitive",
 )
 ```
 
@@ -206,9 +208,17 @@ Checks:
 
 ```text
 isinstance(decoder, CrossAttentionOffsetDecoder)
+len(decoder.blocks) == 2
 ```
 
 Purpose:
 
 Protect the factory API used by `AutoDecDecoder`.
 
+### `test_cross_attention_offset_decoder_runs_stacked_within_primitive_blocks`
+
+Builds a 2-block decoder with `self_attention_mode="within_primitive"` and
+passes `M=6` sampled points with `P=3` primitive tokens. This verifies that the
+decoder can reshape primitive-major samples into `[B*P, S, H]`, run local
+self-attention within each primitive, then return one offset per original
+sampled point.

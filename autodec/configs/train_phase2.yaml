@@ -75,6 +75,9 @@ autodec:
   decoder:
     hidden_dim: 128
     n_heads: 4
+    positional_frequencies: 6
+    n_blocks: 2
+    self_attention_mode: within_primitive
     offset_scale: null
 
 shapenet:

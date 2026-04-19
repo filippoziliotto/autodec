@@ -258,7 +258,15 @@ residual    random [B, P, residual_dim]
 Constructs:
 
 ```text
-AutoDecDecoder(residual_dim=4, n_surface_samples=2, hidden_dim=16, n_heads=4)
+AutoDecDecoder(
+  residual_dim=4,
+  n_surface_samples=2,
+  hidden_dim=16,
+  n_heads=4,
+  positional_frequencies=2,
+  n_blocks=2,
+  self_attention_mode="within_primitive",
+)
 ```
 
 Then zeros all offset-decoder parameters. That forces:
@@ -271,7 +279,8 @@ decoded_points = surface_points
 Checks:
 
 ```text
-decoder_features shape [1, 4, 26]
+surface_position_features shape [1, 4, 15]
+decoder_features shape [1, 4, 38]
 primitive_tokens shape [1, 2, 22]
 decoded_offsets shape [1, 4, 3]
 decoded_points shape [1, 4, 3]
@@ -279,14 +288,20 @@ decoded_points == surface_points
 decoded_weights == 0.5
 ```
 
-Why dimensions are `26` and `22`:
+Why dimensions are `38` and `22`:
 
 ```text
 primitive_dim = 18
 residual_dim = 4
-point feature dim = 3 + 18 + 4 + 1 = 26
+position feature dim = raw XYZ 3 + Fourier 6*2 = 15
+point feature dim = 15 + 18 + 4 + 1 = 38
 primitive token dim = 18 + 4 = 22
 ```
+
+`test_autodec_decoder_can_disable_positional_encoding_for_checkpoint_compatibility`
+sets `positional_frequencies=0`, `n_blocks=1`, and
+`self_attention_mode="none"` and verifies the older point feature dimension
+`26`.
 
 ## Subfolders
 

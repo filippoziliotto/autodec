@@ -47,6 +47,9 @@ class AutoDec(nn.Module):
                 n_heads=_cfg_get(decoder_ctx, "n_heads", _cfg_get(ctx, "n_heads", 4)),
                 exist_tau=_cfg_get(ctx, "exist_tau", 1.0),
                 offset_scale=_cfg_get(decoder_ctx, "offset_scale", _cfg_get(ctx, "offset_scale", None)),
+                positional_frequencies=_cfg_get(decoder_ctx, "positional_frequencies", 6),
+                n_blocks=_cfg_get(decoder_ctx, "n_blocks", 2),
+                self_attention_mode=_cfg_get(decoder_ctx, "self_attention_mode", "within_primitive"),
             )
         self.encoder = encoder
         self.decoder = decoder

@@ -178,8 +178,21 @@ point_encoder.l1/l2/l3
 ```text
 hidden_dim
 n_heads
+positional_frequencies
+n_blocks
+self_attention_mode
 offset_scale
 ```
+
+`positional_frequencies` controls Fourier features for sampled SQ surface
+coordinates. A value of `6` concatenates raw XYZ with
+`sin(2^k*pi*x), cos(2^k*pi*x)` for `k = 0..5`.
+
+`n_blocks` controls how many offset-decoder attention blocks are stacked.
+`self_attention_mode: within_primitive` applies self-attention independently to
+the sampled points from each primitive before primitive-token cross-attention.
+Use `self_attention_mode: none` and `positional_frequencies: 0` for the older
+single-cross-attention decoder shape.
 
 ### `shapenet`
 

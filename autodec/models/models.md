@@ -389,6 +389,8 @@ CrossAttentionOffsetDecoder(
     hidden_dim=128,
     n_heads=4,
     offset_scale=None,
+    n_blocks=1,
+    self_attention_mode="none",
 )
 ```
 
@@ -397,9 +399,14 @@ Submodules:
 ```text
 point_proj       Linear(point_in_dim -> hidden_dim)
 primitive_proj   Linear(primitive_in_dim -> hidden_dim)
-cross_attention  nn.MultiheadAttention(hidden_dim, n_heads, batch_first=True)
+blocks           n_blocks x OffsetDecoderBlock
 offset_mlp       Linear(hidden_dim -> hidden_dim), ReLU, Linear(hidden_dim -> 3)
 ```
+
+Each `OffsetDecoderBlock` applies optional point self-attention, primitive-token
+cross-attention, and an FFN. `self_attention_mode="within_primitive"` groups
+the primitive-major sampled surface points as `[B*P, S, H]` so self-attention is
+local to each primitive instead of full `[P*S, P*S]` attention.
 
 Inputs to `forward`:
 
@@ -431,13 +438,13 @@ Attention output:
 
 ```text
 attended          [B, M, H_dec]
-attention_weights [B, M, P], when return_attention=True
+attention_weights [B, M, P], from the last block when return_attention=True
 ```
 
 Offset MLP input:
 
 ```text
-point_hidden + attended
+final block output
 ```
 
 Offset output:
@@ -466,6 +473,8 @@ build_offset_decoder(
     hidden_dim=128,
     n_heads=4,
     offset_scale=None,
+    n_blocks=1,
+    self_attention_mode="none",
 )
 ```
 
@@ -486,4 +495,3 @@ Any other decoder type raises:
 ```text
 ValueError("Unsupported offset decoder type: ...")
 ```
-

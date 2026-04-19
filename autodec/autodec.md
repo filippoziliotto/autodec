@@ -120,6 +120,13 @@ ctx.exist_tau
 ctx.decoder     AutoDec offset-decoder config
 ```
 
+The decoder keeps raw sampled SQ coordinates and appends Fourier positional
+features before offset prediction. It then applies stacked offset-decoder
+blocks: within-primitive self-attention, primitive-token cross-attention, and an
+FFN. Set `ctx.decoder.positional_frequencies: 0`,
+`ctx.decoder.n_blocks: 1`, and `ctx.decoder.self_attention_mode: none` to
+recover the previous shallow decoder shape for checkpoint compatibility.
+
 Training helpers:
 
 ```text
@@ -264,6 +271,9 @@ n_surface_samples  = 256
 hidden_dim         = 128
 n_heads            = 4
 exist_tau          = 1.0
+positional_frequencies = 6
+n_blocks           = 2
+self_attention_mode = within_primitive
 offset_scale       = None
 ```
 
@@ -282,14 +292,16 @@ Internal decoder dimensions:
 
 ```text
 E_dec dim = primitive_dim = 18
-point_feature_dim = 3 + primitive_dim + D + 1
+position_feature_dim = 3 + 6 * positional_frequencies
+point_feature_dim = position_feature_dim + primitive_dim + D + 1
 primitive_token_dim = primitive_dim + D
 ```
 
-For default `D=64`:
+For default `D=64` and `positional_frequencies=6`:
 
 ```text
-point_feature_dim = 86
+position_feature_dim = 39
+point_feature_dim = 122
 primitive_token_dim = 82
 ```
 
@@ -302,7 +314,7 @@ Main steps:
 4. Per-point decoder features are:
 
    ```text
-   [surface_point, E_dec_for_parent_primitive, residual_for_parent_primitive, gate]
+   [surface_position_features, E_dec_for_parent_primitive, residual_for_parent_primitive, gate]
    ```
 
 5. Primitive tokens are:
@@ -311,7 +323,7 @@ Main steps:
    [E_dec, residual]
    ```
 
-6. `CrossAttentionOffsetDecoder` predicts offsets:
+6. `CrossAttentionOffsetDecoder` predicts offsets with stacked attention blocks:
 
    ```text
    decoded_offsets [B, P*S, 3]
