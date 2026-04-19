@@ -87,110 +87,196 @@ def _json_payload_for_sample(sample, index, total):
     }
 
 
-def render_wrapper_html(title, pane_urls):
+def render_wrapper_html(title, pane_urls, dark_mode=True):
     """Return the browser wrapper page for the three embedded Viser panes."""
 
     escaped_title = html.escape(title)
     sq_url = html.escape(pane_urls["sq"], quote=True)
     reconstruction_url = html.escape(pane_urls["reconstruction"], quote=True)
     gt_url = html.escape(pane_urls["gt"], quote=True)
+    initial_theme = "dark" if dark_mode else "light"
     return f"""<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="{initial_theme}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{escaped_title}</title>
   <style>
-    * {{ box-sizing: border-box; }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+    :root[data-theme="dark"] {{
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2e3347;
+      --text:      #e8eaf0;
+      --muted:     #8b91a8;
+      --subtle:    #5a6080;
+      --btn-bg:    #252836;
+      --btn-hover: #2f3347;
+      --btn-border:#3a3f55;
+      --btn-hover-border: #5a6080;
+      --path-color:#7a82a0;
+      --no-meta:   #3a3f55;
+    }}
+    :root[data-theme="light"] {{
+      --bg:        #f0f2f5;
+      --surface:   #ffffff;
+      --border:    #d4d8e2;
+      --text:      #1a1d27;
+      --muted:     #52606d;
+      --subtle:    #8896a4;
+      --btn-bg:    #f7f8fa;
+      --btn-hover: #eaecf0;
+      --btn-border:#c4cad4;
+      --btn-hover-border: #8896a4;
+      --path-color:#52606d;
+      --no-meta:   #a0aab4;
+    }}
+
     body {{
-      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      color: #1f2933;
-      background: #f7f8fa;
+      color: var(--text);
+      background: var(--bg);
+      transition: background 0.2s, color 0.2s;
     }}
     header {{
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      padding: 12px 16px;
-      border-bottom: 1px solid #d7dde5;
-      background: #ffffff;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
     }}
     h1 {{
-      margin: 0;
-      font-size: 18px;
-      font-weight: 650;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.02em;
     }}
     .controls {{
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
+      gap: 6px;
     }}
     button {{
-      border: 1px solid #9aa6b2;
+      border: 1px solid var(--btn-border);
       border-radius: 6px;
-      background: #ffffff;
-      padding: 7px 12px;
-      color: #1f2933;
+      background: var(--btn-bg);
+      padding: 6px 14px;
+      color: var(--muted);
       cursor: pointer;
       font: inherit;
+      font-size: 13px;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }}
-    button:hover {{ background: #eef2f6; }}
+    button:hover {{
+      background: var(--btn-hover);
+      border-color: var(--btn-hover-border);
+      color: var(--text);
+    }}
+    #theme-btn {{ font-size: 15px; padding: 5px 10px; }}
     #counter {{
-      min-width: 120px;
+      min-width: 70px;
       text-align: center;
+      font-size: 13px;
       font-variant-numeric: tabular-nums;
-    }}
-    #sample-path {{
-      padding: 8px 16px 0;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      color: #52606d;
-      overflow-wrap: anywhere;
-    }}
-    #metadata {{
-      padding: 6px 16px 10px;
-      font-size: 12px;
-      color: #52606d;
-      white-space: pre-wrap;
-      min-height: 28px;
+      color: var(--muted);
     }}
     .panes {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
-      padding: 0 8px 8px;
-      height: calc(100vh - 118px);
-      min-height: 420px;
+      gap: 6px;
+      padding: 6px;
+      flex: 1;
+      min-height: 0;
     }}
     .pane {{
       min-width: 0;
       display: flex;
       flex-direction: column;
-      border: 1px solid #d7dde5;
-      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--surface);
     }}
     .pane-label {{
-      padding: 8px 10px;
-      border-bottom: 1px solid #d7dde5;
-      font-size: 13px;
-      font-weight: 650;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: var(--surface);
     }}
     iframe {{
       width: 100%;
-      height: 100%;
-      border: 0;
       flex: 1;
-      background: #ffffff;
+      border: 0;
+      background: var(--bg);
+    }}
+    footer {{
+      flex-shrink: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 10px 16px;
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }}
+    .footer-section {{
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }}
+    .footer-label {{
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--subtle);
+    }}
+    #sample-path {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--path-color);
+      overflow-wrap: anywhere;
+    }}
+    #metrics-grid {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 20px;
+    }}
+    .metric-chip {{
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }}
+    .metric-key {{
+      font-size: 10px;
+      color: var(--subtle);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .metric-val {{
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      font-weight: 500;
+    }}
+    #no-metadata {{
+      font-size: 12px;
+      color: var(--no-meta);
     }}
     @media (max-width: 900px) {{
-      .panes {{
-        grid-template-columns: 1fr;
-        height: auto;
-      }}
-      .pane {{ height: 70vh; }}
+      .panes {{ grid-template-columns: 1fr; }}
+      .pane {{ height: 65vw; min-height: 280px; }}
     }}
   </style>
 </head>
@@ -198,13 +284,12 @@ def render_wrapper_html(title, pane_urls):
   <header>
     <h1>{escaped_title}</h1>
     <div class="controls">
-      <button id="previous" onclick="navigateSample('/api/sample/previous')">Previous</button>
-      <div id="counter">Loading...</div>
-      <button id="next" onclick="navigateSample('/api/sample/next')">Next</button>
+      <button onclick="navigateSample('/api/sample/previous')">&#8592; Prev</button>
+      <div id="counter">—</div>
+      <button onclick="navigateSample('/api/sample/next')">Next &#8594;</button>
+      <button id="theme-btn" onclick="toggleTheme()" title="Toggle dark/light mode">🌙</button>
     </div>
   </header>
-  <div id="sample-path"></div>
-  <div id="metadata"></div>
   <main class="panes">
     <section class="pane">
       <div class="pane-label">Superquadric reconstruction</div>
@@ -219,14 +304,45 @@ def render_wrapper_html(title, pane_urls):
       <iframe title="Ground truth" src="{gt_url}"></iframe>
     </section>
   </main>
+  <footer>
+    <div class="footer-section" style="flex: 0 0 auto; max-width: 40%;">
+      <div class="footer-label">Sample</div>
+      <div id="sample-path">Loading…</div>
+    </div>
+    <div class="footer-section" style="flex: 1; min-width: 0;">
+      <div class="footer-label">Metrics</div>
+      <div id="metrics-grid"></div>
+      <div id="no-metadata" style="display:none;">No metadata.json</div>
+    </div>
+  </footer>
   <script>
+    function formatVal(v) {{
+      if (typeof v === 'number') {{
+        return Number.isInteger(v) ? v.toString() : v.toFixed(4);
+      }}
+      return String(v);
+    }}
     function updateStatus(payload) {{
       document.getElementById('counter').textContent =
-        (payload.index + 1).toString() + ' / ' + payload.total.toString();
+        (payload.index + 1) + ' / ' + payload.total;
       document.getElementById('sample-path').textContent = payload.sample_dir;
       const metadata = payload.metadata || {{}};
-      document.getElementById('metadata').textContent =
-        Object.keys(metadata).length ? JSON.stringify(metadata, null, 2) : 'No metadata.json';
+      const grid = document.getElementById('metrics-grid');
+      const noMeta = document.getElementById('no-metadata');
+      const keys = Object.keys(metadata);
+      if (keys.length) {{
+        grid.innerHTML = keys.map(k =>
+          `<div class="metric-chip">
+            <span class="metric-key">${{k}}</span>
+            <span class="metric-val">${{formatVal(metadata[k])}}</span>
+          </div>`
+        ).join('');
+        grid.style.display = 'flex';
+        noMeta.style.display = 'none';
+      }} else {{
+        grid.style.display = 'none';
+        noMeta.style.display = '';
+      }}
     }}
     async function navigateSample(endpoint) {{
       const response = await fetch(endpoint, {{ method: 'POST' }});
@@ -235,6 +351,14 @@ def render_wrapper_html(title, pane_urls):
     async function loadCurrentSample() {{
       const response = await fetch('/api/sample/current');
       updateStatus(await response.json());
+    }}
+    async function toggleTheme() {{
+      const html = document.documentElement;
+      const isDark = html.dataset.theme === 'dark';
+      const response = await fetch('/api/theme/toggle', {{ method: 'POST' }});
+      const data = await response.json();
+      html.dataset.theme = data.dark_mode ? 'dark' : 'light';
+      document.getElementById('theme-btn').textContent = data.dark_mode ? '🌙' : '☀️';
     }}
     loadCurrentSample();
   </script>
@@ -310,6 +434,12 @@ def _start_viser_server(viser, host, port):
 
 def _set_default_scene(server):
     server.scene.set_up_direction([0.0, 1.0, 0.0])
+    server.gui.configure_theme(
+        control_layout="collapsible",
+        dark_mode=True,
+        show_logo=False,
+        show_share_button=False,
+    )
 
     @server.on_client_connect
     def _(client):
@@ -336,6 +466,11 @@ class _ViserPane:
 
     def _load_mesh(self, path):
         mesh = self.trimesh.load(path, force="mesh", process=False)
+        mesh.visual = mesh.visual.to_color()
+        face_colors = np.asarray(mesh.visual.face_colors, dtype=np.uint8).copy()
+        if face_colors.ndim == 2 and face_colors.shape[1] == 4:
+            face_colors[:, 3] = 255
+        mesh.visual.face_colors = face_colors
         self.server.scene.add_mesh_trimesh(
             name="/superquadric_reconstruction",
             mesh=mesh,
@@ -365,6 +500,7 @@ class _EvalViewerRuntime:
         self.trimesh = trimesh_module
         self.viser = viser
         self.index = 0
+        self.dark_mode = True
         self.lock = threading.Lock()
         self.panes = {}
 
@@ -420,6 +556,7 @@ class _EvalViewerRuntime:
                 render_wrapper_html(
                     title="AutoDec Test Visualization Browser",
                     pane_urls=self.pane_urls,
+                    dark_mode=self.dark_mode,
                 ),
                 mimetype="text/html",
             )
@@ -436,6 +573,20 @@ class _EvalViewerRuntime:
         @app.post("/api/sample/previous")
         def previous_sample():
             return self.jsonify(self._move(-1))
+
+        @app.post("/api/theme/toggle")
+        def toggle_theme():
+            with self.lock:
+                self.dark_mode = not self.dark_mode
+                dark = self.dark_mode
+            for pane in self.panes.values():
+                pane.server.gui.configure_theme(
+                    control_layout="collapsible",
+                    dark_mode=dark,
+                    show_logo=False,
+                    show_share_button=False,
+                )
+            return self.jsonify({"dark_mode": dark})
 
         return app
 

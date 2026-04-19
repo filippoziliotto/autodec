@@ -260,6 +260,7 @@ max_batches
 compute_loss_metrics
 compute_paper_metrics
 f_score_threshold
+use_lm_optimization
 prune_decoded_points
 prune_exist_threshold
 prune_target_count
@@ -277,6 +278,13 @@ data/eval/<run_name>/per_sample_metrics.jsonl
 `compute_paper_metrics` enables symmetric Chamfer-L1, symmetric Chamfer-L2,
 x100-scaled Chamfer values, and F-score metrics for paper-style reporting.
 `f_score_threshold` defaults to `0.01`.
+
+`use_lm_optimization` defaults to `false`. When true, standalone test
+evaluation enables SuperDec's LM refinement inside `AutoDecEncoder` before the
+AutoDec decoder runs. This is intended as an evaluation-only ablation because it
+decodes refined SQ parameters with the original residual latents. The current
+SuperDec LM implementation uses CUDA-only operations, so this flag requires a
+CUDA device.
 
 `prune_decoded_points` enables inference-style pruning before paper metrics and
 test visualizations. `prune_exist_threshold` defaults to `0.5`. If

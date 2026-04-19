@@ -85,6 +85,7 @@ eval:
   compute_loss_metrics: true
   compute_paper_metrics: true
   f_score_threshold: 0.01
+  use_lm_optimization: false
   prune_decoded_points: true
   prune_exist_threshold: 0.5
   prune_target_count: null

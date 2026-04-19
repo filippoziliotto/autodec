@@ -64,6 +64,19 @@ class FakeHeads(nn.Module):
         }
 
 
+class RecordingLMOptimizer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, outdict, points):
+        self.calls += 1
+        result = dict(outdict)
+        result["trans"] = outdict["trans"] + 1.0
+        result["lm_marker"] = points.shape[1]
+        return result
+
+
 def _ctx(feature_dim=4, n_queries=2, residual_dim=3):
     return SimpleNamespace(
         residual_dim=residual_dim,
@@ -103,3 +116,45 @@ def test_autodec_encoder_returns_superdec_outputs_features_and_residual():
     assert out["residual"].shape == (2, 2, 3)
     assert out["exist_logit"].shape == (2, 2, 1)
     assert torch.allclose(out["assign_matrix"].sum(dim=-1), torch.ones(2, 5))
+
+
+def test_autodec_encoder_lm_optimization_is_disabled_by_default():
+    from autodec.encoder import AutoDecEncoder
+
+    ctx = _ctx()
+    encoder = AutoDecEncoder(
+        ctx,
+        point_encoder=FakePointEncoder(feature_dim=4),
+        layers=FakeLayers(n_queries=2, feature_dim=4),
+        heads=FakeHeads(),
+    )
+
+    assert encoder.lm_optimization is False
+    assert not hasattr(encoder, "lm_optimizer")
+
+
+def test_autodec_encoder_can_enable_and_disable_lm_optimization():
+    from autodec.encoder import AutoDecEncoder
+
+    ctx = _ctx()
+    lm_optimizer = RecordingLMOptimizer()
+    encoder = AutoDecEncoder(
+        ctx,
+        point_encoder=FakePointEncoder(feature_dim=4),
+        layers=FakeLayers(n_queries=2, feature_dim=4),
+        heads=FakeHeads(),
+    )
+
+    encoder.enable_lm_optimization(lm_optimizer=lm_optimizer)
+    out = encoder(torch.randn(2, 5, 3))
+
+    assert lm_optimizer.calls == 1
+    assert out["lm_marker"] == 5
+    assert torch.allclose(out["trans"], torch.ones(2, 2, 3))
+
+    encoder.disable_lm_optimization()
+    out = encoder(torch.randn(2, 5, 3))
+
+    assert lm_optimizer.calls == 1
+    assert "lm_marker" not in out
+    assert torch.allclose(out["trans"], torch.zeros(2, 2, 3))

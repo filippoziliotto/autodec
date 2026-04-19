@@ -1,9 +1,7 @@
 import os
 from pathlib import Path
 
-import hydra
 import torch
-from omegaconf import DictConfig, OmegaConf
 
 from autodec.eval.evaluator import AutoDecEvaluator
 from autodec.training.builders import (
@@ -15,6 +13,17 @@ from autodec.training.builders import (
 )
 from autodec.utils.checkpoints import load_autodec_checkpoint
 from autodec.visualizations import AutoDecEpochVisualizer
+
+try:
+    from omegaconf import DictConfig, OmegaConf
+except ModuleNotFoundError:
+    DictConfig = object
+    OmegaConf = None
+
+try:
+    import hydra
+except ModuleNotFoundError:
+    hydra = None
 
 
 def _build_dataset(cfg):
@@ -43,8 +52,26 @@ def _build_eval_visualizer(cfg):
     )
 
 
-@hydra.main(config_path="../configs", config_name="eval_test", version_base=None)
-def main(cfg: DictConfig):
+def maybe_enable_lm_optimization(model, cfg, device):
+    eval_cfg = cfg_get(cfg, "eval")
+    if not cfg_get(eval_cfg, "use_lm_optimization", False):
+        return False
+    if device.type != "cuda":
+        raise RuntimeError(
+            "eval.use_lm_optimization requires CUDA because SuperDec LMOptimizer "
+            "uses CUDA-only operations."
+        )
+    encoder = getattr(model, "encoder", None)
+    if encoder is None or not hasattr(encoder, "enable_lm_optimization"):
+        raise TypeError("LM optimization requires a model with AutoDecEncoder")
+    encoder.enable_lm_optimization()
+    return True
+
+
+def _main(cfg: DictConfig):
+    if OmegaConf is None:
+        raise ModuleNotFoundError("omegaconf is required to run AutoDec evaluation")
+
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     set_seed(cfg.seed)
 
@@ -59,6 +86,7 @@ def main(cfg: DictConfig):
         map_location=device,
         load_optimizer=False,
     )
+    maybe_enable_lm_optimization(model, cfg, device)
     loss_fn = build_loss(cfg).to(device)
     dataset = _build_dataset(cfg)
     visualizer = _build_eval_visualizer(cfg)
@@ -86,6 +114,12 @@ def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(OmegaConf.create(result["metrics"])))
 
 
+if hydra is None:
+    def main(*args, **kwargs):
+        raise ModuleNotFoundError("hydra is required to run AutoDec evaluation")
+else:
+    main = hydra.main(config_path="../configs", config_name="eval_test", version_base=None)(_main)
+
+
 if __name__ == "__main__":
     main()
-

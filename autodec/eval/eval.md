@@ -16,6 +16,12 @@ test visualizations use decoded points pruned by primitive existence. Training
 loss metrics still use the raw fixed-size decoded tensor so they stay aligned
 with the training objective.
 
+When `eval.use_lm_optimization` is true, `run.py` enables SuperDec LM
+optimization on `model.encoder` after loading the AutoDec checkpoint and before
+running evaluation. This is off by default and should be reported separately
+from the main AutoDec result because the decoder receives refined SQ parameters
+with the original residual latent. The current LM implementation requires CUDA.
+
 `selectors.py` contains deterministic ShapeNet sample selection. It reads
 `dataset.models`, groups entries by category, requires the configured minimum
 number of categories, and returns fixed dataset indices for visualization.

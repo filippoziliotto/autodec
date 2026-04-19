@@ -25,10 +25,6 @@ class AutoDecEncoder(nn.Module):
         self.emb_dims = ctx.point_encoder.l3.out_channels
         self.residual_dim = getattr(ctx, "residual_dim", 64)
         self.lm_optimization = False
-        if self.lm_optimization:
-            from superdec.lm_optimization.lm_optimizer import LMOptimizer
-
-            self.lm_optimizer = LMOptimizer()
 
         if point_encoder is None:
             from superdec.models.point_encoder import StackedPVConv
@@ -45,6 +41,23 @@ class AutoDecEncoder(nn.Module):
 
         init_queries = torch.zeros(self.n_queries + 1, self.emb_dims)
         self.register_buffer("init_queries", init_queries)
+
+    def enable_lm_optimization(self, lm_optimizer=None):
+        """Enable SuperDec LM refinement before AutoDec residual decoding."""
+
+        if lm_optimizer is None:
+            from superdec.lm_optimization.lm_optimizer import LMOptimizer
+
+            lm_optimizer = LMOptimizer()
+        self.lm_optimizer = lm_optimizer
+        self.lm_optimization = True
+        return self
+
+    def disable_lm_optimization(self):
+        self.lm_optimization = False
+        if hasattr(self, "lm_optimizer"):
+            delattr(self, "lm_optimizer")
+        return self
 
     def _build_layers(self, ctx):
         decoder_layer = DecoderLayer(

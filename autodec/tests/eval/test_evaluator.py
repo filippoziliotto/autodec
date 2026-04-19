@@ -76,6 +76,17 @@ class TinyLoss:
         }
 
 
+class TinyLMModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = SimpleNamespace(enable_calls=0)
+
+        def enable_lm_optimization():
+            self.encoder.enable_calls += 1
+
+        self.encoder.enable_lm_optimization = enable_lm_optimization
+
+
 class TinyVisualizer:
     def __init__(self, root):
         self.root = Path(root)
@@ -245,3 +256,42 @@ def test_evaluator_sends_pruned_decoded_points_to_visualizer(tmp_path):
     evaluator.evaluate()
 
     assert visualizer.decoded_shape == (1, 1, 3)
+
+
+def test_eval_lm_optimization_flag_is_disabled_by_default(tmp_path):
+    from autodec.eval.run import maybe_enable_lm_optimization
+
+    cfg = _cfg(tmp_path)
+    model = TinyLMModel()
+
+    enabled = maybe_enable_lm_optimization(model, cfg, torch.device("cpu"))
+
+    assert enabled is False
+    assert model.encoder.enable_calls == 0
+
+
+def test_eval_lm_optimization_flag_requires_cuda(tmp_path):
+    from autodec.eval.run import maybe_enable_lm_optimization
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.use_lm_optimization = True
+
+    try:
+        maybe_enable_lm_optimization(TinyLMModel(), cfg, torch.device("cpu"))
+    except RuntimeError as exc:
+        assert "requires CUDA" in str(exc)
+    else:
+        raise AssertionError("Expected CUDA guard to reject LM optimization on CPU")
+
+
+def test_eval_lm_optimization_flag_enables_encoder_on_cuda(tmp_path):
+    from autodec.eval.run import maybe_enable_lm_optimization
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.use_lm_optimization = True
+    model = TinyLMModel()
+
+    enabled = maybe_enable_lm_optimization(model, cfg, torch.device("cuda"))
+
+    assert enabled is True
+    assert model.encoder.enable_calls == 1

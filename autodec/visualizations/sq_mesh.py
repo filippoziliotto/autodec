@@ -6,14 +6,18 @@ import torch
 
 _COLORS = np.array(
     [
-        [230, 57, 70, 220],
-        [29, 53, 87, 220],
-        [69, 123, 157, 220],
-        [42, 157, 143, 220],
-        [233, 196, 106, 220],
-        [244, 162, 97, 220],
-        [38, 70, 83, 220],
-        [141, 153, 174, 220],
+        [255,  50,  50, 230],   # red
+        [ 50, 180, 255, 230],   # sky blue
+        [ 50, 255, 100, 230],   # green
+        [255, 220,   0, 230],   # yellow
+        [210,  60, 255, 230],   # violet
+        [  0, 240, 240, 230],   # cyan
+        [255, 130,  20, 230],   # orange
+        [255,  80, 200, 230],   # hot pink
+        [180, 255,  20, 230],   # lime
+        [110, 110, 255, 230],   # periwinkle
+        [255, 210,  80, 230],   # amber
+        [ 40, 255, 180, 230],   # mint
     ],
     dtype=np.uint8,
 )
@@ -159,7 +163,9 @@ def _write_mesh_obj(path, mesh):
                 red, green, blue = (channel / 255.0 for channel in color[:3])
                 alpha = color[3] / 255.0 if len(color) > 3 else 1.0
                 handle.write(f"newmtl {name}\n")
+                handle.write(f"Ka {red:.6f} {green:.6f} {blue:.6f}\n")
                 handle.write(f"Kd {red:.6f} {green:.6f} {blue:.6f}\n")
+                handle.write(f"Ke {red:.6f} {green:.6f} {blue:.6f}\n")
                 handle.write(f"d {alpha:.6f}\n\n")
 
     with Path(path).open("w", encoding="utf-8") as handle:
