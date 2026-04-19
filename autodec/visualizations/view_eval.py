@@ -266,12 +266,20 @@ def build_arg_parser():
     return parser
 
 
+def _patch_trimesh_numpy2():
+    import numpy as np
+
+    if not hasattr(np.ndarray, "ptp"):
+        np.ndarray.ptp = lambda self, *args, **kwargs: np.ptp(self, *args, **kwargs)
+
+
 def _import_runtime_dependencies():
     try:
         from flask import Flask, jsonify, Response
     except ImportError as exc:
         raise RuntimeError("Flask is required for the AutoDec visualization browser.") from exc
     try:
+        _patch_trimesh_numpy2()
         import trimesh
     except ImportError as exc:
         raise RuntimeError("trimesh is required for loading superquadric mesh outputs.") from exc
