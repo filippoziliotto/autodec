@@ -268,9 +268,17 @@ def build_arg_parser():
 
 def _patch_trimesh_numpy2():
     import numpy as np
+    import trimesh.util as _tutil
 
-    if not hasattr(np.ndarray, "ptp"):
-        np.ndarray.ptp = lambda self, *args, **kwargs: np.ptp(self, *args, **kwargs)
+    _orig_allclose = _tutil.allclose
+
+    def _patched_allclose(a, b, atol=1e-8):
+        try:
+            return _orig_allclose(a, b, atol)
+        except AttributeError:
+            return float(np.ptp(np.asarray(a) - np.asarray(b))) < atol
+
+    _tutil.allclose = _patched_allclose
 
 
 def _import_runtime_dependencies():
@@ -279,8 +287,8 @@ def _import_runtime_dependencies():
     except ImportError as exc:
         raise RuntimeError("Flask is required for the AutoDec visualization browser.") from exc
     try:
-        _patch_trimesh_numpy2()
         import trimesh
+        _patch_trimesh_numpy2()
     except ImportError as exc:
         raise RuntimeError("trimesh is required for loading superquadric mesh outputs.") from exc
     try:
