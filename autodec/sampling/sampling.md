@@ -77,6 +77,11 @@ angle_sampler optional injected sampler for tests or custom sampling
 eps           numerical floor used in signed powers
 ```
 
+The sampler defensively clamps shape exponents to `[0.1, 2.0]` before calling
+the angle sampler and before evaluating signed-power surface coordinates. Normal
+AutoDec head outputs are already in this range, but this protects manually built
+or externally loaded outdicts.
+
 ### Required input keys
 
 `forward(outdict)` requires:
@@ -242,4 +247,3 @@ geometrically valid. The decoder uses the weights later to gate offsets:
 ```text
 decoded_points = surface_points + weights * offsets
 ```
-

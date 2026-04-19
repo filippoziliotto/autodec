@@ -2,6 +2,7 @@ import json
 import sys
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 
 
@@ -167,6 +168,36 @@ def test_sq_mesh_export_assigns_distinct_materials_per_primitive(tmp_path):
     assert "newmtl primitive_0001" in mtl_text
     assert "Kd 0.901961 0.223529 0.274510" in mtl_text
     assert "Kd 0.113725 0.207843 0.341176" in mtl_text
+
+
+def test_sq_mesh_vertices_clamp_out_of_range_shape_exponents():
+    from autodec.visualizations.sq_mesh import _primitive_vertices
+
+    resolution = 6
+    eta_idx = 2
+    omega_idx = 4
+    vertices = _primitive_vertices(
+        scale=np.ones(3, dtype=np.float32),
+        shape=np.array([0.0, 3.0], dtype=np.float32),
+        rotate=np.eye(3, dtype=np.float32),
+        trans=np.zeros(3, dtype=np.float32),
+        resolution=resolution,
+    )
+
+    eta = np.linspace(-np.pi / 2.0, np.pi / 2.0, resolution, dtype=np.float32)[eta_idx]
+    omega = np.linspace(-np.pi, np.pi, resolution, endpoint=False, dtype=np.float32)[
+        omega_idx
+    ]
+    expected = np.array(
+        [
+            np.sign(np.cos(eta)) * np.abs(np.cos(eta)) ** 0.1 * np.cos(omega) ** 2.0,
+            np.sign(np.sin(omega)) * np.abs(np.cos(eta)) ** 0.1 * np.abs(np.sin(omega)) ** 2.0,
+            np.sign(np.sin(eta)) * np.abs(np.sin(eta)) ** 0.1,
+        ],
+        dtype=np.float32,
+    )
+
+    assert np.allclose(vertices[eta_idx * resolution + omega_idx], expected, atol=1e-6)
 
 
 def test_visualizations_folder_has_same_name_documentation():

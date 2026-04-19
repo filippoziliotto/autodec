@@ -140,6 +140,12 @@ Purpose:
 
 Protect the critical rule that existence weights do not multiply coordinates.
 
+### `test_sq_surface_sampler_clamps_out_of_range_shape_exponents`
+
+Passes shape exponents outside the valid superquadric range directly to the
+sampler and checks that generated coordinates use `[0.1, 2.0]` clamped
+exponents.
+
 ### `test_sq_surface_sampler_keeps_gradients_to_sq_parameters`
 
 Uses one fixed sample and computes:
@@ -164,4 +170,3 @@ parameters after fixed angles are chosen.
 This does not test differentiability of angle selection itself. The production
 sampler intentionally detaches scale and shape before calling the SuperDec
 NumPy/C++ equal-distance sampler.
-

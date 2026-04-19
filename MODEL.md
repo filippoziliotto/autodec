@@ -827,6 +827,11 @@ scale.detach().cpu().numpy()  [B, P, 3]
 shape.detach().cpu().numpy()  [B, P, 2]
 ```
 
+Before angle sampling and signed-power coordinate evaluation, the sampler
+defensively clamps shape exponents to `[0.1, 2.0]`. Normal `SuperDecHead`
+outputs already lie in `(0.1, 1.9)`, but this protects manually constructed or
+externally loaded `outdict` values.
+
 Therefore, gradients do not flow through the choice of sample angles. This is
 intentional in the current code. Gradients still flow through the sampled point
 coordinates with respect to `scale`, `shape`, `rotate`, and `trans`.

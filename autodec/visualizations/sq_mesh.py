@@ -17,6 +17,8 @@ _COLORS = np.array(
     ],
     dtype=np.uint8,
 )
+MIN_SHAPE_EXPONENT = 0.1
+MAX_SHAPE_EXPONENT = 2.0
 
 
 def _to_numpy(value):
@@ -53,6 +55,7 @@ def _grid_faces(n_eta, n_omega):
 
 
 def _primitive_vertices(scale, shape, rotate, trans, resolution):
+    shape = np.clip(shape, MIN_SHAPE_EXPONENT, MAX_SHAPE_EXPONENT)
     etas = np.linspace(-np.pi / 2.0, np.pi / 2.0, resolution, dtype=np.float32)
     omegas = np.linspace(-np.pi, np.pi, resolution, endpoint=False, dtype=np.float32)
     eta_grid, omega_grid = np.meshgrid(etas, omegas, indexing="ij")

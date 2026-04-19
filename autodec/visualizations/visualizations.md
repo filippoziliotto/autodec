@@ -150,6 +150,34 @@ log_wandb_visualizations(wandb_run, records, step=epoch)
 The trainer normally calls `build_wandb_log` through its injected
 `wandb_visual_log_builder`; this wrapper is available for direct/manual use.
 
+## `view_eval.py`
+
+Launches a local browser-based viewer for test visualization folders written by
+`AutoDecEpochVisualizer`:
+
+```bash
+python -m autodec.visualizations.view_eval data/eval/autodec_test_eval
+```
+
+The input path can be a run root, a split/epoch directory, or a single
+`sample_0000` directory. Complete sample directories must contain:
+
+```text
+sq_mesh.obj
+reconstruction.ply
+input_gt.ply
+```
+
+The command starts three Viser panes plus one lightweight Flask wrapper page and
+prints the wrapper URL. It does not open a browser automatically. The wrapper
+page provides Back/Forward navigation and embeds independently interactive panes
+for the superquadric mesh, decoded point reconstruction, and ground-truth point
+cloud.
+
+`viser` is imported lazily at runtime, so tests and non-viewer visualization
+utilities can still import the module in environments where Viser is not
+installed.
+
 ## `pointcloud.py`
 
 Contains point-cloud formatting and local file export.
@@ -194,7 +222,8 @@ Contains the lightweight superquadric mesh exporter.
 It does not call the SuperDec CUDA sampler or `PredictionHandler`. It directly
 evaluates the signed-power superquadric surface on a regular `(eta, omega)`
 grid, applies the predicted rotation and translation, and exports active
-primitive meshes with deterministic colors.
+primitive meshes with deterministic colors. Mesh generation defensively clamps
+shape exponents to `[0.1, 2.0]`, matching the sampler's valid exponent range.
 
 ### `build_sq_mesh`
 

@@ -61,6 +61,39 @@ def test_sq_surface_sampler_does_not_scale_coordinates_by_existence_weight():
     assert sample.weights[0, 0] < 1e-6
 
 
+def test_sq_surface_sampler_clamps_out_of_range_shape_exponents():
+    from autodec.sampling.sq_surface import SQSurfaceSampler
+
+    eta = torch.tensor([torch.pi / 6])
+    omega = torch.tensor([torch.pi / 3])
+    outdict = {
+        "scale": torch.ones(1, 1, 3),
+        "shape": torch.tensor([[[0.0, 3.0]]]),
+        "rotate": torch.eye(3).view(1, 1, 3, 3),
+        "trans": torch.zeros(1, 1, 3),
+        "exist_logit": torch.zeros(1, 1, 1),
+    }
+    sampler = SQSurfaceSampler(
+        n_samples=1,
+        angle_sampler=FixedAngleSampler(etas=eta, omegas=omega),
+    )
+
+    sample = sampler(outdict)
+
+    expected = torch.tensor(
+        [
+            [
+                [
+                    torch.cos(eta)[0].pow(0.1) * torch.cos(omega)[0].pow(2.0),
+                    torch.cos(eta)[0].pow(0.1) * torch.sin(omega)[0].pow(2.0),
+                    torch.sin(eta)[0].pow(0.1),
+                ]
+            ]
+        ]
+    )
+    assert torch.allclose(sample.flat_points, expected, atol=1e-6)
+
+
 def test_sq_surface_sampler_keeps_gradients_to_sq_parameters():
     from autodec.sampling.sq_surface import SQSurfaceSampler
 

@@ -4,6 +4,10 @@ import torch
 import torch.nn as nn
 
 
+MIN_SHAPE_EXPONENT = 0.1
+MAX_SHAPE_EXPONENT = 2.0
+
+
 @dataclass
 class SQSurfaceSample:
     canonical_points: torch.Tensor
@@ -48,6 +52,7 @@ class SQSurfaceSampler(nn.Module):
         return torch.sign(value) * torch.clamp(value.abs(), min=self.eps).pow(exponent)
 
     def _canonical_points(self, scale, shape, etas, omegas):
+        shape = shape.clamp(MIN_SHAPE_EXPONENT, MAX_SHAPE_EXPONENT)
         e1 = shape[..., 0].unsqueeze(-1)
         e2 = shape[..., 1].unsqueeze(-1)
         sx = scale[..., 0].unsqueeze(-1)
@@ -66,7 +71,7 @@ class SQSurfaceSampler(nn.Module):
 
     def forward(self, outdict):
         scale = outdict["scale"]
-        shape = outdict["shape"]
+        shape = outdict["shape"].clamp(MIN_SHAPE_EXPONENT, MAX_SHAPE_EXPONENT)
         rotate = outdict["rotate"]
         trans = outdict["trans"]
         exist_logit = outdict["exist_logit"]
