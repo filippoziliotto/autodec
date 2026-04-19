@@ -136,21 +136,22 @@ class AutoDecDecoder(nn.Module):
         }
         return decoder_features, primitive_tokens, components
 
-    def forward(self, outdict, return_attention=False):
-        sample = self.surface_sampler(outdict)
-        primitive_features = pack_decoder_primitive_features(outdict)
-        residual = outdict["residual"]
-        position_features = self.surface_position_features(sample.flat_points)
-
-        gates = sample.weights.unsqueeze(-1)
+    def _decode_offsets(
+        self,
+        position_features,
+        primitive_features,
+        residual,
+        gates,
+        part_ids,
+        return_attention=False,
+    ):
         decoder_features, primitive_tokens, component_features = self._decoder_feature_inputs(
             position_features,
             primitive_features,
             residual,
             gates,
-            sample.part_ids,
+            part_ids,
         )
-
         if return_attention:
             offsets, attention = self.offset_decoder(
                 decoder_features,
@@ -160,6 +161,23 @@ class AutoDecDecoder(nn.Module):
         else:
             offsets = self.offset_decoder(decoder_features, primitive_tokens)
             attention = None
+        return decoder_features, primitive_tokens, component_features, offsets, attention
+
+    def forward(self, outdict, return_attention=False, return_consistency=False):
+        sample = self.surface_sampler(outdict)
+        primitive_features = pack_decoder_primitive_features(outdict)
+        residual = outdict["residual"]
+        position_features = self.surface_position_features(sample.flat_points)
+
+        gates = sample.weights.unsqueeze(-1)
+        decoder_features, primitive_tokens, component_features, offsets, attention = self._decode_offsets(
+            position_features,
+            primitive_features,
+            residual,
+            gates,
+            sample.part_ids,
+            return_attention=return_attention,
+        )
 
         decoded_points = sample.flat_points + gates * offsets
         result = dict(outdict)
@@ -181,4 +199,15 @@ class AutoDecDecoder(nn.Module):
         result.update(component_features)
         if attention is not None:
             result["decoder_attention"] = attention
+        if return_consistency:
+            zero_residual = torch.zeros_like(residual)
+            _, _, _, consistency_offsets, _ = self._decode_offsets(
+                position_features,
+                primitive_features,
+                zero_residual,
+                gates,
+                sample.part_ids,
+            )
+            result["consistency_decoded_offsets"] = consistency_offsets
+            result["consistency_decoded_points"] = sample.flat_points + gates * consistency_offsets
         return result

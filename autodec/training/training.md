@@ -126,6 +126,11 @@ min_backward_weight
 The aliases exist because older implementation notes used `w_*` names while
 the current `AutoDecLoss` constructor uses `lambda_*`.
 
+If `lambda_cons > 0`, the trainer calls the model with
+`return_consistency=True`, causing an extra decoder pass with the residual
+latent zeroed. With the default `lambda_cons: 0.0`, the extra pass is not
+requested.
+
 ### `build_optimizer`
 
 Builds a phase-aware Adam optimizer.

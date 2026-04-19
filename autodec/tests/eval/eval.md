@@ -11,4 +11,6 @@ F-score metric names, configurable F-score thresholds, and metric averaging.
 `test_evaluator.py` uses tiny in-memory fakes to verify that the evaluator writes
 summary metrics, per-sample metrics, category-aware visualization metadata, and
 pruned paper-metric/visualization inputs without requiring ShapeNet files or a
-real AutoDec checkpoint.
+real AutoDec checkpoint. It also checks that loss evaluation requests
+`return_consistency=True` when `lambda_cons > 0`, so the intended no-residual
+consistency loss has the decoder output it needs.

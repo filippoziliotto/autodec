@@ -19,6 +19,16 @@ def move_batch_to_device(batch, device):
     }
 
 
+def loss_requires_consistency_pass(loss_fn):
+    return float(getattr(loss_fn, "lambda_cons", 0.0)) > 0.0
+
+
+def model_forward(model, points, return_consistency=False):
+    if return_consistency:
+        return model(points, return_consistency=True)
+    return model(points)
+
+
 class AutoDecTrainer:
     """Device-safe trainer for AutoDec model/loss pairs."""
 
@@ -103,7 +113,11 @@ class AutoDecTrainer:
         with grad_context:
             for batch in pbar:
                 batch = move_batch_to_device(batch, self.device)
-                outdict = self.model(batch["points"].float())
+                outdict = model_forward(
+                    self.model,
+                    batch["points"].float(),
+                    return_consistency=loss_requires_consistency_pass(self.loss_fn),
+                )
                 loss, metrics = self.loss_fn(batch, outdict)
 
                 if training:

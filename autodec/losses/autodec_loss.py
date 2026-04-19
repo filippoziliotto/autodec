@@ -110,10 +110,15 @@ class AutoDecLoss(nn.Module):
             )
 
     def _consistency_loss(self, outdict, target):
-        if "surface_points" not in outdict or "decoded_weights" not in outdict:
-            return None
+        if "consistency_decoded_points" not in outdict:
+            raise ValueError(
+                "lambda_cons > 0 requires outdict['consistency_decoded_points']; "
+                "call the model with return_consistency=True"
+            )
+        if "decoded_weights" not in outdict:
+            raise ValueError("lambda_cons > 0 requires outdict['decoded_weights']")
         return weighted_chamfer_l2(
-            outdict["surface_points"],
+            outdict["consistency_decoded_points"],
             target,
             outdict["decoded_weights"],
             eps=self.chamfer_eps,
@@ -175,9 +180,8 @@ class AutoDecLoss(nn.Module):
 
         if self.lambda_cons > 0:
             consistency = self._consistency_loss(outdict, target)
-            if consistency is not None:
-                loss = loss + self.lambda_cons * consistency
-                metrics["consistency_loss"] = _metric_value(consistency)
+            loss = loss + self.lambda_cons * consistency
+            metrics["consistency_loss"] = _metric_value(consistency)
 
         metrics["all"] = _metric_value(loss)
         return loss, metrics

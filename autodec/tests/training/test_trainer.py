@@ -23,6 +23,33 @@ class TinyLoss(nn.Module):
         return loss, {"all": loss.detach().item()}
 
 
+class ConsistencyLoss(nn.Module):
+    lambda_cons = 1.0
+
+    def forward(self, batch, outdict):
+        assert "consistency_decoded_points" in outdict
+        loss = outdict["consistency_decoded_points"].square().mean()
+        return loss, {"all": loss.detach().item(), "consistency_loss": loss.detach().item()}
+
+
+class ConsistencyTinyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.bias = nn.Parameter(torch.tensor(1.0))
+        self.return_consistency_flags = []
+
+    def forward(self, points, return_consistency=False):
+        self.return_consistency_flags.append(return_consistency)
+        decoded = points[:, :1, :] * 0.0 + self.bias
+        outdict = {
+            "decoded_points": decoded,
+            "decoded_weights": torch.ones(points.shape[0], 1, device=points.device),
+        }
+        if return_consistency:
+            outdict["consistency_decoded_points"] = decoded + 1.0
+        return outdict
+
+
 class RecordingVisualizer:
     def __init__(self):
         self.calls = []
@@ -113,3 +140,27 @@ def test_autodec_trainer_logs_visualizations_after_eval_epoch(tmp_path):
     assert visualizer.calls[0]["split"] == "val"
     assert visualizer.calls[0]["num_samples"] == 2
     assert wandb_run.logs[-1] == ({"visual/gt": ["record"]}, 4)
+
+
+def test_autodec_trainer_requests_consistency_pass_only_when_loss_needs_it(tmp_path):
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": [{"points": torch.ones(2, 3, 3)}],
+    }
+    model = ConsistencyTinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=ConsistencyLoss(),
+        ctx=SimpleNamespace(num_epochs=1, save_path=str(tmp_path)),
+        device=torch.device("cpu"),
+    )
+
+    trainer.train_one_epoch(0)
+
+    assert model.return_consistency_flags == [True]

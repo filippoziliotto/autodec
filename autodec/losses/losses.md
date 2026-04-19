@@ -450,6 +450,12 @@ outdict["decoded_points"]   [B, M, 3]
 outdict["decoded_weights"]  [B, M]
 ```
 
+When `lambda_cons > 0`, also requires:
+
+```text
+outdict["consistency_decoded_points"] [B, M, 3]
+```
+
 Phase-2 also requires:
 
 ```text
@@ -510,14 +516,34 @@ if lambda_exist > 0:
 
 #### Consistency term
 
-If `lambda_cons > 0`, current code computes:
+If `lambda_cons > 0`, the trainer/evaluator request a second decoder pass with
+the residual latent zeroed:
 
 ```text
-L_cons = weighted_chamfer_l2(surface_points, target_points, decoded_weights)
+Z_cons = zeros_like(Z)
+consistency_decoded_points = decoder(E_dec, Z_cons)
+L_cons = weighted_chamfer_l2(
+    consistency_decoded_points,
+    target_points,
+    decoded_weights,
+)
 L += lambda_cons * L_cons
 ```
 
-This is scaffold Chamfer. It is not a second decoder pass with `Z=0`.
+This is the intended no-residual consistency loss. It still uses the learned
+offset decoder; it just removes residual information from the decoder input.
+
+If `lambda_cons > 0` and `consistency_decoded_points` is missing from the
+outdict, `AutoDecLoss` raises a `ValueError` instead of silently falling back to
+scaffold Chamfer.
+
+`scaffold_chamfer` remains a diagnostic metric:
+
+```text
+weighted_chamfer_l2(surface_points, target_points, decoded_weights)
+```
+
+It is computed under `torch.no_grad()` and is not added to the objective.
 
 #### Metrics
 
@@ -550,4 +576,3 @@ Optional consistency metric:
 ```text
 consistency_loss
 ```
-

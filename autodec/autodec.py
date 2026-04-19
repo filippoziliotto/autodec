@@ -55,9 +55,13 @@ class AutoDec(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    def forward(self, points, return_attention=False):
+    def forward(self, points, return_attention=False, return_consistency=False):
         outdict = self.encoder(points)
-        return self.decoder(outdict, return_attention=return_attention)
+        return self.decoder(
+            outdict,
+            return_attention=return_attention,
+            return_consistency=return_consistency,
+        )
 
     def _set_requires_grad(self, module, value):
         if module is None:

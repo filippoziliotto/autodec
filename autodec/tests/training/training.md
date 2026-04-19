@@ -192,3 +192,25 @@ Purpose:
 
 Verify the trainer can run a complete train/eval step on CPU without hardcoded
 `.cuda()` calls.
+
+### `test_autodec_trainer_requests_consistency_pass_only_when_loss_needs_it`
+
+Uses a tiny loss with:
+
+```text
+lambda_cons = 1.0
+```
+
+and a model that records the `return_consistency` flag passed to `forward`.
+
+Checks:
+
+```text
+return_consistency == True
+consistency_decoded_points is present before loss computation
+```
+
+Purpose:
+
+Verify the trainer requests the extra zero-residual decoder pass only when the
+configured loss needs `L_cons`.

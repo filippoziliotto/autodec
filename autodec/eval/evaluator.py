@@ -9,7 +9,11 @@ from tqdm import tqdm
 from autodec.eval.metrics import MetricAverager, paper_chamfer_metrics
 from autodec.eval.selectors import select_category_balanced_indices
 from autodec.training.builders import cfg_get
-from autodec.training.trainer import move_batch_to_device
+from autodec.training.trainer import (
+    loss_requires_consistency_pass,
+    model_forward,
+    move_batch_to_device,
+)
 from autodec.utils.inference import prune_decoded_points
 from autodec.visualizations import build_wandb_log
 
@@ -132,7 +136,12 @@ class AutoDecEvaluator:
             if max_batches is not None and batch_index >= int(max_batches):
                 break
             batch = move_batch_to_device(batch, self.device)
-            outdict = self.model(batch["points"].float())
+            outdict = model_forward(
+                self.model,
+                batch["points"].float(),
+                return_consistency=compute_loss
+                and loss_requires_consistency_pass(self.loss_fn),
+            )
             batch_size = _batch_size(batch)
             total_samples += batch_size
 

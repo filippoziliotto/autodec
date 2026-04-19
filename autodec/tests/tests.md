@@ -59,6 +59,17 @@ assign_matrix [3, 5, 1]
 decoder_attention [3, 2, 1]
 ```
 
+#### `test_autodec_wrapper_forwards_consistency_request`
+
+Calls:
+
+```text
+model(points, return_consistency=True)
+```
+
+Checks the injected decoder receives `return_consistency=True` and the returned
+outdict includes `consistency_decoded_points`.
+
 #### `test_autodec_phase1_freezes_superdec_backbone_but_not_residual_or_decoder`
 
 Checks `freeze_encoder_backbone()` freezes:
@@ -304,6 +315,12 @@ primitive token dim = 2 projected components * 4 = 8
 sets `positional_frequencies=0`, `component_feature_dim=0`, `n_blocks=1`, and
 `self_attention_mode="none"` and verifies the older raw point feature dimension
 `26`.
+
+`test_autodec_decoder_return_consistency_uses_zero_residual_pass` replaces the
+offset decoder with a small residual-echo module and calls
+`return_consistency=True`. It verifies the normal pass sees nonzero residuals
+while the consistency pass uses `Z=0` and therefore returns the unoffset surface
+points.
 
 ## Subfolders
 

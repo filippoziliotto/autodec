@@ -98,6 +98,7 @@ surface_points
 decoded_offsets
 decoder_features
 primitive_tokens
+consistency_decoded_points, only when `return_consistency=True`
 ```
 
 Constructor:
@@ -363,8 +364,15 @@ decoder_features          [B, P*S, 3 + 18 + D + 1]
 primitive_tokens          [B, P, 18 + D]
 decoded_offsets           [B, P*S, 3]
 decoded_points            [B, P*S, 3]
+consistency_decoded_offsets [B, P*S, 3], only when requested
+consistency_decoded_points  [B, P*S, 3], only when requested
 decoder_attention         [B, P*S, P], only when requested
 ```
+
+When `return_consistency=True`, the decoder runs the same sampled SQ surface
+through the offset decoder a second time with `residual = 0`. This supports
+`lambda_cons > 0` without changing the default forward cost when the consistency
+loss is disabled.
 
 ## Subfolders
 

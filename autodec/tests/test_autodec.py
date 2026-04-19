@@ -30,8 +30,10 @@ class ToyDecoder(nn.Module):
     def __init__(self):
         super().__init__()
         self.weight = nn.Parameter(torch.tensor(1.0))
+        self.return_consistency_flags = []
 
-    def forward(self, outdict, return_attention=False):
+    def forward(self, outdict, return_attention=False, return_consistency=False):
+        self.return_consistency_flags.append(return_consistency)
         batch = outdict["scale"].shape[0]
         decoded = torch.zeros(batch, 2, 3, device=outdict["scale"].device) + self.weight
         result = dict(outdict)
@@ -39,6 +41,8 @@ class ToyDecoder(nn.Module):
         result["decoded_weights"] = torch.ones(batch, 2, device=decoded.device)
         if return_attention:
             result["decoder_attention"] = torch.ones(batch, 2, 1, device=decoded.device)
+        if return_consistency:
+            result["consistency_decoded_points"] = decoded + 1.0
         return result
 
 
@@ -52,6 +56,18 @@ def test_autodec_wrapper_runs_encoder_then_decoder_and_exports_attention():
     assert out["decoded_points"].shape == (3, 2, 3)
     assert out["assign_matrix"].shape == (3, 5, 1)
     assert out["decoder_attention"].shape == (3, 2, 1)
+
+
+def test_autodec_wrapper_forwards_consistency_request():
+    from autodec.autodec import AutoDec
+
+    decoder = ToyDecoder()
+    model = AutoDec(encoder=ToyEncoder(), decoder=decoder)
+
+    out = model(torch.randn(3, 5, 3), return_consistency=True)
+
+    assert decoder.return_consistency_flags == [True]
+    assert out["consistency_decoded_points"].shape == (3, 2, 3)
 
 
 def test_autodec_phase1_freezes_superdec_backbone_but_not_residual_or_decoder():

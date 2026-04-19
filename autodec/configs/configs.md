@@ -330,6 +330,8 @@ min_backward_weight
 ```
 
 Phase 1 should set SQ/parsimony/existence lambdas to zero.
+`lambda_cons` defaults to `0.0`. When enabled, it uses a true no-residual
+decoder pass, `decoder(E_dec, Z=0)`, rather than raw scaffold Chamfer.
 
 Phase 2 enables:
 

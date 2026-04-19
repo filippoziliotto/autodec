@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 
 class FixedAngleSampler:
@@ -76,3 +77,44 @@ def test_autodec_decoder_can_disable_positional_encoding_for_checkpoint_compatib
 
     assert out["surface_position_features"].shape == (1, 4, 3)
     assert out["decoder_features"].shape == (1, 4, 26)
+
+
+class ResidualEchoOffsetDecoder(nn.Module):
+    def __init__(self, residual_dim):
+        super().__init__()
+        self.residual_dim = residual_dim
+
+    def forward(self, point_features, primitive_tokens, return_attention=False):
+        residual = point_features[..., -(self.residual_dim + 1) : -1]
+        offsets = point_features.new_zeros(point_features.shape[0], point_features.shape[1], 3)
+        offsets[..., 0] = residual.mean(dim=-1)
+        if return_attention:
+            attention = point_features.new_ones(point_features.shape[0], point_features.shape[1], 1)
+            return offsets, attention
+        return offsets
+
+
+def test_autodec_decoder_return_consistency_uses_zero_residual_pass():
+    from autodec.decoder import AutoDecDecoder
+
+    residual_dim = 4
+    decoder = AutoDecDecoder(
+        residual_dim=residual_dim,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        angle_sampler=FixedAngleSampler(),
+    )
+    decoder.offset_decoder = ResidualEchoOffsetDecoder(residual_dim)
+    outdict = _encoder_outdict(residual_dim=residual_dim)
+    outdict["residual"] = torch.ones_like(outdict["residual"])
+
+    out = decoder(outdict, return_consistency=True)
+
+    assert torch.allclose(out["decoded_offsets"][..., 0], torch.ones(1, 4))
+    assert torch.allclose(out["consistency_decoded_offsets"][..., 0], torch.zeros(1, 4))
+    assert torch.allclose(out["consistency_decoded_points"], out["surface_points"])

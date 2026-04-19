@@ -84,3 +84,35 @@ def test_autodec_loss_phase2_composes_regularizers_and_metrics():
     assert metrics["active_primitive_count"] == 1.0
     assert "primitive_mass_entropy" in metrics
     assert "scaffold_chamfer" in metrics
+
+
+def test_autodec_loss_consistency_uses_zero_residual_decoder_points():
+    from autodec.losses.autodec_loss import AutoDecLoss
+
+    batch = {"points": torch.tensor([[[0.0, 0.0, 0.0]]])}
+    outdict = _outdict()
+    outdict["decoded_points"] = torch.tensor([[[0.0, 0.0, 0.0]]])
+    outdict["surface_points"] = torch.tensor([[[5.0, 0.0, 0.0]]])
+    outdict["consistency_decoded_points"] = torch.tensor([[[2.0, 0.0, 0.0]]])
+
+    loss_fn = AutoDecLoss(phase=1, lambda_cons=0.5)
+
+    loss, metrics = loss_fn(batch, outdict)
+
+    assert metrics["recon"] == 0.0
+    assert metrics["scaffold_chamfer"] == 50.0
+    assert metrics["consistency_loss"] == 8.0
+    assert loss.item() == 4.0
+
+
+def test_autodec_loss_requires_consistency_decoder_points_when_enabled():
+    from autodec.losses.autodec_loss import AutoDecLoss
+
+    loss_fn = AutoDecLoss(phase=1, lambda_cons=1.0)
+
+    try:
+        loss_fn(_batch(), _outdict())
+    except ValueError as exc:
+        assert "consistency_decoded_points" in str(exc)
+    else:
+        raise AssertionError("Expected missing consistency decoder output to fail")

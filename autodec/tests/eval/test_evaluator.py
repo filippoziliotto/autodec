@@ -44,6 +44,29 @@ class TinyEvalModel(nn.Module):
         }
 
 
+class ConsistencyEvalModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.return_consistency_flags = []
+
+    def forward(self, points, return_consistency=False):
+        self.return_consistency_flags.append(return_consistency)
+        batch_size = points.shape[0]
+        outdict = {
+            "decoded_points": points + 0.1,
+            "decoded_weights": torch.ones(batch_size, points.shape[1]),
+            "surface_points": points,
+            "scale": torch.ones(batch_size, 1, 3),
+            "shape": torch.ones(batch_size, 1, 2),
+            "rotate": torch.eye(3).view(1, 1, 3, 3).repeat(batch_size, 1, 1, 1),
+            "trans": torch.zeros(batch_size, 1, 3),
+            "exist": torch.ones(batch_size, 1, 1),
+        }
+        if return_consistency:
+            outdict["consistency_decoded_points"] = points + 0.2
+        return outdict
+
+
 class PrunableEvalModel(nn.Module):
     def forward(self, points):
         batch_size = points.shape[0]
@@ -73,6 +96,18 @@ class TinyLoss:
             "offset_ratio": 0.0,
             "scaffold_chamfer": 0.0,
             "all": 0.25,
+        }
+
+
+class ConsistencyEvalLoss:
+    lambda_cons = 1.0
+
+    def __call__(self, batch, outdict):
+        assert "consistency_decoded_points" in outdict
+        return torch.tensor(0.25), {
+            "recon": 0.25,
+            "consistency_loss": 0.5,
+            "all": 0.75,
         }
 
 
@@ -219,6 +254,27 @@ def test_evaluator_computes_paper_metrics_on_pruned_decoded_points(tmp_path):
 
     assert result["metrics"]["paper_chamfer_l1"] == 0.0
     assert result["metrics"]["paper_chamfer_l2"] == 0.0
+
+
+def test_evaluator_requests_consistency_pass_when_loss_needs_it(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    cfg = _cfg(tmp_path)
+    cfg.visualization.enabled = False
+    model = ConsistencyEvalModel()
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=model,
+        loss_fn=ConsistencyEvalLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=None,
+    )
+
+    result = evaluator.evaluate()
+
+    assert model.return_consistency_flags
+    assert all(model.return_consistency_flags)
+    assert result["metrics"]["consistency_loss"] == 0.5
 
 
 def test_evaluator_sends_pruned_decoded_points_to_visualizer(tmp_path):

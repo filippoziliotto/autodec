@@ -16,6 +16,11 @@ test visualizations use decoded points pruned by primitive existence. Training
 loss metrics still use the raw fixed-size decoded tensor so they stay aligned
 with the training objective.
 
+If loss metrics are enabled and `lambda_cons > 0`, `evaluator.py` requests
+`return_consistency=True` from the model. This computes the no-residual decoder
+pass needed for the consistency loss. The default configs keep
+`lambda_cons: 0.0`, so standard evaluation still runs a single decoder pass.
+
 When `eval.use_lm_optimization` is true, `run.py` enables SuperDec LM
 optimization on `model.encoder` after loading the AutoDec checkpoint and before
 running evaluation. This is off by default and should be reported separately

@@ -340,3 +340,43 @@ Purpose:
 
 Verify phase 2 composes weighted loss terms and logs diagnostic metrics.
 
+### `test_autodec_loss_consistency_uses_zero_residual_decoder_points`
+
+Constructs an outdict where:
+
+```text
+decoded_points = target_points
+surface_points = [5,0,0]
+consistency_decoded_points = [2,0,0]
+lambda_cons = 0.5
+```
+
+Checks:
+
+```text
+recon == 0
+scaffold_chamfer == 50
+consistency_loss == 8
+loss == 4
+```
+
+Purpose:
+
+Verify `L_cons` is computed from `consistency_decoded_points`, not from raw
+`surface_points`.
+
+### `test_autodec_loss_requires_consistency_decoder_points_when_enabled`
+
+Enables `lambda_cons` without adding `consistency_decoded_points` to the
+outdict.
+
+Checks:
+
+```text
+ValueError mentions consistency_decoded_points
+```
+
+Purpose:
+
+Prevent silent fallback to scaffold Chamfer when the no-residual decoder pass
+was not requested.
