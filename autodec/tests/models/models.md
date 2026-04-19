@@ -131,6 +131,26 @@ Purpose:
 Confirm the module returns both the residual latent and pooled local feature
 when requested by `AutoDecEncoder`.
 
+### `test_part_residual_projector_builds_mean_max_variance_statistics`
+
+Uses the same deterministic assignment setup and verifies the residual branch
+can build the `[mean, max, variance]` statistic tensor:
+
+```text
+primitive 0 mean = [3,4], max = [5,6], variance = [4,4]
+primitive 1 mean = [3,4], max = [3,4], variance = [0,0]
+```
+
+The forward-path test also checks that the residual MLP input width is `4H`,
+covering `sq_features + mean + max + variance`.
+
+### `test_part_residual_projector_max_ignores_inactive_assignments`
+
+Uses negative point features with hard assignments and checks that inactive
+zero-weight entries do not dominate the mass-weighted max statistic. This keeps
+the max statistic tied to points assigned to each primitive, even when assigned
+features are negative.
+
 ## `test_offset_decoder.py`
 
 Tests:

@@ -179,6 +179,7 @@ point_encoder.l1/l2/l3
 hidden_dim
 n_heads
 positional_frequencies
+component_feature_dim
 n_blocks
 self_attention_mode
 offset_scale
@@ -188,11 +189,17 @@ offset_scale
 coordinates. A value of `6` concatenates raw XYZ with
 `sin(2^k*pi*x), cos(2^k*pi*x)` for `k = 0..5`.
 
+`component_feature_dim` controls split projections for decoder inputs. If it is
+`null`, the decoder uses `max(4, hidden_dim // 4)`. Position features, `E_dec`,
+residual `Z`, and the existence gate are projected separately before being
+concatenated. Set it to `0` to disable this projection and use the older raw
+concatenation path.
+
 `n_blocks` controls how many offset-decoder attention blocks are stacked.
 `self_attention_mode: within_primitive` applies self-attention independently to
 the sampled points from each primitive before primitive-token cross-attention.
-Use `self_attention_mode: none` and `positional_frequencies: 0` for the older
-single-cross-attention decoder shape.
+Use `self_attention_mode: none`, `positional_frequencies: 0`, and
+`component_feature_dim: 0` for the older single-cross-attention decoder shape.
 
 ### `shapenet`
 

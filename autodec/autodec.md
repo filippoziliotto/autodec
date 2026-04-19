@@ -272,6 +272,7 @@ hidden_dim         = 128
 n_heads            = 4
 exist_tau          = 1.0
 positional_frequencies = 6
+component_feature_dim = None
 n_blocks           = 2
 self_attention_mode = within_primitive
 offset_scale       = None
@@ -293,16 +294,18 @@ Internal decoder dimensions:
 ```text
 E_dec dim = primitive_dim = 18
 position_feature_dim = 3 + 6 * positional_frequencies
-point_feature_dim = position_feature_dim + primitive_dim + D + 1
-primitive_token_dim = primitive_dim + D
+component_feature_dim = max(4, hidden_dim // 4) if None
+point_feature_dim = 4 * component_feature_dim
+primitive_token_dim = 2 * component_feature_dim
 ```
 
-For default `D=64` and `positional_frequencies=6`:
+For default `D=64`, `hidden_dim=128`, and `positional_frequencies=6`:
 
 ```text
 position_feature_dim = 39
-point_feature_dim = 122
-primitive_token_dim = 82
+component_feature_dim = 32
+point_feature_dim = 128
+primitive_token_dim = 64
 ```
 
 Main steps:
@@ -314,14 +317,21 @@ Main steps:
 4. Per-point decoder features are:
 
    ```text
-   [surface_position_features, E_dec_for_parent_primitive, residual_for_parent_primitive, gate]
+   [projected_surface_position, projected_E_dec_for_parent_primitive, projected_residual_for_parent_primitive, projected_gate]
    ```
 
 5. Primitive tokens are:
 
    ```text
-   [E_dec, residual]
+   [projected_E_dec, projected_residual]
    ```
+
+Set `component_feature_dim=0` to disable split projections and recover raw
+concatenation:
+
+```text
+[surface_position_features, E_dec_for_parent_primitive, residual_for_parent_primitive, gate]
+```
 
 6. `CrossAttentionOffsetDecoder` predicts offsets with stacked attention blocks:
 

@@ -264,6 +264,7 @@ AutoDecDecoder(
   hidden_dim=16,
   n_heads=4,
   positional_frequencies=2,
+  component_feature_dim=4,
   n_blocks=2,
   self_attention_mode="within_primitive",
 )
@@ -280,27 +281,28 @@ Checks:
 
 ```text
 surface_position_features shape [1, 4, 15]
-decoder_features shape [1, 4, 38]
-primitive_tokens shape [1, 2, 22]
+decoder_features shape [1, 4, 16]
+primitive_tokens shape [1, 2, 8]
 decoded_offsets shape [1, 4, 3]
 decoded_points shape [1, 4, 3]
 decoded_points == surface_points
 decoded_weights == 0.5
 ```
 
-Why dimensions are `38` and `22`:
+Why dimensions are `16` and `8`:
 
 ```text
 primitive_dim = 18
 residual_dim = 4
 position feature dim = raw XYZ 3 + Fourier 6*2 = 15
-point feature dim = 15 + 18 + 4 + 1 = 38
-primitive token dim = 18 + 4 = 22
+component feature dim = 4
+point feature dim = 4 projected components * 4 = 16
+primitive token dim = 2 projected components * 4 = 8
 ```
 
 `test_autodec_decoder_can_disable_positional_encoding_for_checkpoint_compatibility`
-sets `positional_frequencies=0`, `n_blocks=1`, and
-`self_attention_mode="none"` and verifies the older point feature dimension
+sets `positional_frequencies=0`, `component_feature_dim=0`, `n_blocks=1`, and
+`self_attention_mode="none"` and verifies the older raw point feature dimension
 `26`.
 
 ## Subfolders

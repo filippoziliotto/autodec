@@ -275,7 +275,7 @@ eps           1e-6 by default
 Network:
 
 ```text
-Linear(2H -> hidden_dim)
+Linear(4H -> hidden_dim)
 ReLU
 Linear(hidden_dim -> D)
 ```
@@ -328,6 +328,24 @@ Output:
 pooled [B, P, H]
 ```
 
+### `pool_point_feature_stats`
+
+Signature:
+
+```python
+pool_point_feature_stats(point_features, assign_matrix)
+```
+
+Returns the concatenated assignment-weighted statistics used by the residual
+MLP:
+
+```text
+[mean, mass_weighted_max, variance]  # [B, P, 3H]
+```
+
+`pool_point_features` remains the mean-only helper and is still returned as
+`pooled_features` for diagnostics and compatibility.
+
 ### `forward`
 
 Signature:
@@ -348,7 +366,8 @@ Computation:
 
 ```text
 pooled = pool_point_features(point_features, assign_matrix)
-residual_input = concat(sq_features, pooled)  # [B, P, 2H]
+pooled_stats = pool_point_feature_stats(point_features, assign_matrix)
+residual_input = concat(sq_features, pooled_stats)  # [B, P, 4H]
 residual = MLP(residual_input)                # [B, P, D]
 ```
 

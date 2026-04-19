@@ -64,6 +64,7 @@ autodec:
     hidden_dim: 128
     n_heads: 4
     positional_frequencies: 6
+    component_feature_dim: null
     n_blocks: 2
     self_attention_mode: within_primitive
     offset_scale: null

@@ -32,6 +32,7 @@ def test_autodec_decoder_builds_features_and_gates_offsets():
         hidden_dim=16,
         n_heads=4,
         positional_frequencies=2,
+        component_feature_dim=4,
         n_blocks=2,
         self_attention_mode="within_primitive",
         angle_sampler=FixedAngleSampler(),
@@ -43,8 +44,11 @@ def test_autodec_decoder_builds_features_and_gates_offsets():
 
     assert out["surface_position_features"].shape == (1, 4, 15)
     assert torch.allclose(out["surface_position_features"][..., :3], out["surface_points"])
-    assert out["decoder_features"].shape == (1, 4, 38)
-    assert out["primitive_tokens"].shape == (1, 2, 22)
+    assert out["decoder_features"].shape == (1, 4, 16)
+    assert out["primitive_tokens"].shape == (1, 2, 8)
+    assert out["projected_E_dec"].shape == (1, 2, 4)
+    assert out["projected_residual"].shape == (1, 2, 4)
+    assert out["projected_gates"].shape == (1, 4, 4)
     assert out["decoded_offsets"].shape == (1, 4, 3)
     assert out["decoded_points"].shape == (1, 4, 3)
     assert torch.allclose(out["decoded_points"], out["surface_points"])
@@ -60,6 +64,7 @@ def test_autodec_decoder_can_disable_positional_encoding_for_checkpoint_compatib
         hidden_dim=16,
         n_heads=4,
         positional_frequencies=0,
+        component_feature_dim=0,
         n_blocks=1,
         self_attention_mode="none",
         angle_sampler=FixedAngleSampler(),
