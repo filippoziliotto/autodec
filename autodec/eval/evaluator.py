@@ -10,6 +10,7 @@ from autodec.eval.metrics import MetricAverager, paper_chamfer_metrics
 from autodec.eval.selectors import select_category_balanced_indices
 from autodec.training.builders import cfg_get
 from autodec.training.trainer import move_batch_to_device
+from autodec.utils.inference import prune_decoded_points
 from autodec.visualizations import build_wandb_log
 
 
@@ -97,10 +98,29 @@ class AutoDecEvaluator:
         metrics.update({key: _jsonable(value) for key, value in paper_metrics.items()})
         return metrics
 
+    def _prune_target_count(self, eval_cfg, batch):
+        target_count = cfg_get(eval_cfg, "prune_target_count", None)
+        if target_count is None:
+            return int(batch["points"].shape[1])
+        return int(target_count)
+
+    def _maybe_prune_outdict(self, outdict, batch):
+        eval_cfg = cfg_get(self.cfg, "eval")
+        if not cfg_get(eval_cfg, "prune_decoded_points", False):
+            return outdict
+        result = dict(outdict)
+        result["decoded_points"] = prune_decoded_points(
+            outdict,
+            exist_threshold=cfg_get(eval_cfg, "prune_exist_threshold", 0.5),
+            target_count=self._prune_target_count(eval_cfg, batch),
+        )
+        return result
+
     def _evaluate_loader(self):
         eval_cfg = cfg_get(self.cfg, "eval")
         compute_loss = cfg_get(eval_cfg, "compute_loss_metrics", True)
         compute_paper = cfg_get(eval_cfg, "compute_paper_metrics", True)
+        f_score_threshold = cfg_get(eval_cfg, "f_score_threshold", 0.01)
         max_batches = cfg_get(eval_cfg, "max_batches")
 
         averager = MetricAverager()
@@ -123,9 +143,11 @@ class AutoDecEvaluator:
 
             paper_metrics = {}
             if compute_paper:
+                paper_outdict = self._maybe_prune_outdict(outdict, batch)
                 paper_metrics = paper_chamfer_metrics(
-                    outdict["decoded_points"],
+                    paper_outdict["decoded_points"],
                     batch["points"],
+                    f_score_threshold=f_score_threshold,
                 )
                 averager.update(paper_metrics, batch_size=batch_size)
 
@@ -166,6 +188,7 @@ class AutoDecEvaluator:
         batch = default_collate(items)
         batch = move_batch_to_device(batch, self.device)
         outdict = self.model(batch["points"].float())
+        outdict = self._maybe_prune_outdict(outdict, batch)
         records = self.visualizer.write_epoch(
             batch=batch,
             outdict=outdict,
@@ -223,4 +246,3 @@ class AutoDecEvaluator:
         if self.wandb_run is not None:
             self.wandb_run.log({f"{self.split}/{key}": value for key, value in metrics.items()})
         return summary
-

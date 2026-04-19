@@ -8,6 +8,7 @@ Files:
 ```text
 __init__.py
 checkpoints.py
+inference.py
 metrics.py
 packing.py
 ```
@@ -134,6 +135,22 @@ val_loss
 ```
 
 Handles DDP-wrapped models by saving `model.module.state_dict()`.
+
+## `inference.py`
+
+Defines:
+
+```text
+prune_decoded_points
+```
+
+Purpose:
+
+Inference/evaluation post-processing for fixed-size decoded point clouds. It
+uses primitive existence probabilities and `part_ids` to keep decoded points
+from active primitives only. If `target_count` is provided, it deterministically
+downsamples or repeats the pruned points so metrics can still consume a dense
+`[B, target_count, 3]` tensor.
 
 ## `metrics.py`
 

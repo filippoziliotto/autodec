@@ -7,13 +7,22 @@ def _to_float(value):
     return float(value)
 
 
-def paper_chamfer_metrics(pred, target):
-    """Return SuperDec paper-style symmetric Chamfer-L1 and Chamfer-L2.
+def _threshold_key(value):
+    text = f"{float(value):.6g}".replace(".", "_")
+    return text
+
+
+def paper_chamfer_metrics(pred, target, f_score_threshold=0.01, eps=1e-8):
+    """Return paper-style point-cloud reconstruction metrics.
 
     Chamfer-L1 uses Euclidean nearest-neighbor distances. Chamfer-L2 uses the
     squared nearest-neighbor distances. Both terms are averaged symmetrically:
 
         0.5 * (mean pred->target + mean target->pred)
+
+    The x100 variants match the common table-reporting convention. F-score uses
+    precision over predicted points and recall over target points at the given
+    Euclidean distance threshold.
     """
 
     if pred.ndim != 3 or pred.shape[-1] != 3:
@@ -30,9 +39,18 @@ def paper_chamfer_metrics(pred, target):
 
     chamfer_l1 = 0.5 * (pred_to_target.mean() + target_to_pred.mean())
     chamfer_l2 = 0.5 * (pred_to_target.pow(2).mean() + target_to_pred.pow(2).mean())
+    precision = (pred_to_target <= f_score_threshold).to(pred.dtype).mean()
+    recall = (target_to_pred <= f_score_threshold).to(pred.dtype).mean()
+    f_score = 2.0 * precision * recall / (precision + recall).clamp_min(eps)
+    threshold_key = _threshold_key(f_score_threshold)
     return {
         "paper_chamfer_l1": chamfer_l1,
         "paper_chamfer_l2": chamfer_l2,
+        "paper_chamfer_l1_x100": chamfer_l1 * 100.0,
+        "paper_chamfer_l2_x100": chamfer_l2 * 100.0,
+        f"paper_precision_tau_{threshold_key}": precision,
+        f"paper_recall_tau_{threshold_key}": recall,
+        f"paper_f_score_tau_{threshold_key}": f_score,
     }
 
 
@@ -57,4 +75,3 @@ class MetricAverager:
             for key in sorted(self._sums)
             if self._counts[key] > 0
         }
-

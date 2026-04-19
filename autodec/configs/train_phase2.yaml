@@ -115,4 +115,5 @@ loss:
   lambda_exist: 0.01
   lambda_cons: 0.0
   n_sq_samples: 256
+  exist_point_threshold: 24.0
   min_backward_weight: 1e-3

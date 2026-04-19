@@ -10,20 +10,19 @@ The implemented package is modular:
   plus per-primitive residual latents.
 - `autodec.decoder.AutoDecDecoder` turns primitive parameters and residuals into
   decoded point coordinates.
+- `autodec.autodec.AutoDec` composes the encoder and decoder behind a single
+  model call.
 - `autodec.losses.AutoDecLoss` computes reconstruction and optional primitive
   regularization losses.
 
-There is not yet a single high-level `AutoDec` wrapper class in `autodec/`.
-The implemented end-to-end data flow is therefore:
+The implemented end-to-end data flow is:
 
 ```python
-encoder = AutoDecEncoder(ctx)
-decoder = AutoDecDecoder(...)
+model = AutoDec(ctx)
 loss_fn = AutoDecLoss(...)
 
-encoded = encoder(points)
-decoded = decoder(encoded)
-loss, metrics = loss_fn(batch, decoded)
+outdict = model(points)
+loss, metrics = loss_fn(batch, outdict)
 ```
 
 All shapes below use these symbols:
@@ -48,6 +47,7 @@ In the default design, `P` is the configured `ctx.decoder.n_queries`, `H` is
 The root package `autodec/__init__.py` exports:
 
 ```text
+AutoDec
 AutoDecEncoder
 AutoDecDecoder
 AutoDecLoss
@@ -70,6 +70,7 @@ The implemented forward path is:
 
 ```text
 points [B, N, 3]
+  -> AutoDec
   -> AutoDecEncoder
      -> point_features [B, N, H]
      -> sq_features [B, P, H]
@@ -93,6 +94,10 @@ points [B, N, 3]
      -> reconstruction loss
      -> optional SQ fitting, parsimony, existence, and consistency terms
 ```
+
+`AutoDec.forward(points)` is the normal training and evaluation entry point.
+The lower-level `AutoDecEncoder` and `AutoDecDecoder` modules can still be used
+directly for ablations or tests.
 
 The explicit primitive code used by the neural decoder is not the 12-value
 project-spec notation. The code uses the actual SuperDec rotation matrix:
@@ -1272,6 +1277,11 @@ Low-existence primitives still produce scaffold points, but those points:
 1. receive nearly zero learned displacement, and
 2. are downweighted or penalized in the weighted losses.
 
+Training intentionally keeps all `P*S` decoded points. This fixed-size tensor is
+important for batching, differentiability, and stable loss computation. Hard
+removal of inactive primitives belongs in inference or reporting code, not in
+the training forward pass.
+
 ### Decoder Output Dictionary
 
 `AutoDecDecoder.forward` returns a copy of the input `outdict` plus:
@@ -1294,6 +1304,105 @@ If `return_attention=True`, it also returns:
 ```text
 decoder_attention         [B, M, P]
 ```
+
+## Inference-Time Pruning
+
+### Does Pruning Make Sense?
+
+Yes, pruning makes sense for inference, visualization, and paper-style
+evaluation. During training, inactive primitives are handled softly through
+`decoded_weights` and the weighted Chamfer loss. At inference time, however,
+leaving low-existence scaffold points in `decoded_points` can create a mismatch:
+points from primitives that would be considered inactive still participate in
+raw Chamfer metrics and still appear in point-cloud exports.
+
+The right distinction is:
+
+```text
+training:    keep fixed [B, P*S, 3], use soft weights in the loss
+inference:   drop or downselect points from inactive primitives
+evaluation:  prune first, then optionally resample/repeat to a fixed point count
+```
+
+The standalone evaluator can now prune `outdict["decoded_points"]` before
+paper-style metrics and test visualizations by setting
+`eval.prune_decoded_points: true`. Training validation still uses the raw
+fixed-size tensor and `AutoDecLoss`, which keeps validation aligned with the
+training objective.
+
+### Pruning Inputs
+
+The model already emits everything needed for pruning:
+
+```text
+exist             [B, P, 1]       primitive existence probability
+exist_logit       [B, P, 1]       raw existence logit
+decoded_weights   [B, P*S]        sigmoid(exist_logit / tau), repeated per point
+part_ids          [P*S]           primitive index for each decoded point
+decoded_points    [B, P*S, 3]     decoded fixed-size point cloud
+surface_points    [B, P*S, 3]     SQ scaffold point cloud
+decoded_offsets   [B, P*S, 3]     predicted offsets
+```
+
+For pruning, prefer primitive-level `exist > threshold` when the goal is to
+remove whole primitives. Use `decoded_weights > threshold` only if the gate
+temperature is part of the inference policy.
+
+### Implemented Post-Processing Helper
+
+The pruning logic lives in `autodec/utils/inference.py`:
+
+```python
+def prune_decoded_points(
+    outdict,
+    exist_threshold=0.5,
+    target_count=None,
+):
+    ...
+```
+
+Behavior:
+
+1. Compute `primitive_active = outdict["exist"].squeeze(-1) > exist_threshold`.
+2. Convert that to a point mask with `point_active = primitive_active[:, part_ids]`.
+3. For each batch item, return `decoded_points[b, point_active[b]]`.
+4. If no primitive is active, keep the highest-existence primitive rather than
+   returning an empty point cloud.
+5. If `target_count` is set, resample or repeat points to that count for fair
+   fixed-cardinality metrics.
+
+This keeps the model forward path unchanged and avoids mixing training behavior
+with reporting behavior.
+
+### Where To Add It
+
+There are three useful integration levels:
+
+```text
+1. Visualization-only:
+   For standalone test evaluation, this is implemented through
+   autodec/eval/evaluator.py before calling AutoDecEpochVisualizer.
+   Training visualizations are still raw unless a separate visualization-only
+   config is added.
+
+2. Evaluation metrics:
+   Apply pruning in autodec/eval/evaluator.py before paper_chamfer_metrics.
+   This is implemented and controlled by:
+     eval.prune_decoded_points: true
+     eval.prune_exist_threshold: 0.5
+     eval.prune_target_count: null
+
+3. Public inference API:
+   The helper is public through autodec.utils.prune_decoded_points. A richer
+   InferenceResult object could still return both:
+     raw decoded_points    [B, P*S, 3]
+     pruned point clouds   list[Tensor[N_b, 3]]
+   This is best if downstream scripts will consume AutoDec predictions.
+```
+
+The implemented first step is option 2 plus test-evaluation visualizations and
+the reusable helper. It intentionally does not change training validation loss
+or checkpoint selection.
 
 ## Losses
 
@@ -2092,27 +2201,22 @@ phase-2 total loss       scalar
 
 ## What Is Not Implemented Yet
 
-The current `autodec/` code does not yet include:
+The current `autodec/` code already includes the high-level model wrapper,
+training builders/trainer, evaluation entrypoint, visualizations, metrics
+helpers, and checkpoint helpers. The remaining model-level gaps are:
 
 ```text
-autodec/autodec.py high-level wrapper class
-autodec/training/* training builders or trainer
 autodec/data/* re-exports
-autodec/utils/metrics.py standalone metrics module
-evaluation scripts under autodec/evaluate
 normal-alignment SQ loss
-second decoder pass with Z=0 for consistency loss
+true second decoder pass with Z=0 for consistency loss
 adaptive sampling per primitive
-inference-time hard primitive pruning
+training-time paper metrics and pruned training visualizations
+editing/correspondence utilities for part removal, swap, and interpolation
 ```
 
-The existing modules are sufficient to manually compose:
-
-```text
-encoder -> decoder -> loss
-```
-
-but training infrastructure still needs to be added around them.
+`lambda_cons` currently reuses scaffold Chamfer as a consistency-style penalty.
+It does not run the full decoder with `residual = 0`, so it is cheaper but not
+identical to the optional consistency loss described in `PROJECT.md`.
 
 ## Correctness Checklist
 
@@ -2152,4 +2256,3 @@ model.
     their lambdas.
 28. Current consistency loss is scaffold Chamfer, not a second `Z=0` decoder
     pass.
-

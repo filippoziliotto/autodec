@@ -6,6 +6,7 @@ Files:
 
 ```text
 test_checkpoints.py
+test_inference.py
 test_metrics.py
 test_packing.py
 ```
@@ -60,6 +61,22 @@ model weights restored
 Purpose:
 
 Protect full AutoDec resume behavior.
+
+## `test_inference.py`
+
+Tests:
+
+```text
+autodec.utils.inference.prune_decoded_points
+```
+
+Checks:
+
+```text
+inactive primitive decoded points are removed
+fixed-count resampling is deterministic
+if no primitive is active, the highest-existence primitive is kept
+```
 
 ## `test_metrics.py`
 

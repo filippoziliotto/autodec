@@ -259,6 +259,10 @@ output_dir
 max_batches
 compute_loss_metrics
 compute_paper_metrics
+f_score_threshold
+prune_decoded_points
+prune_exist_threshold
+prune_target_count
 ```
 
 `split` defaults to `test`. `output_dir` defaults to `data/eval`, and the
@@ -270,8 +274,14 @@ data/eval/<run_name>/per_sample_metrics.jsonl
 ```
 
 `compute_loss_metrics` enables the same scalar loss metrics used in training.
-`compute_paper_metrics` enables symmetric Chamfer-L1 and Chamfer-L2 metrics for
-paper-style reporting.
+`compute_paper_metrics` enables symmetric Chamfer-L1, symmetric Chamfer-L2,
+x100-scaled Chamfer values, and F-score metrics for paper-style reporting.
+`f_score_threshold` defaults to `0.01`.
+
+`prune_decoded_points` enables inference-style pruning before paper metrics and
+test visualizations. `prune_exist_threshold` defaults to `0.5`. If
+`prune_target_count` is `null`, pruned outputs are resampled to the target point
+count from the current batch.
 
 with differential learning rates.
 
@@ -287,6 +297,7 @@ lambda_par
 lambda_exist
 lambda_cons
 n_sq_samples
+exist_point_threshold
 min_backward_weight
 ```
 

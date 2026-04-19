@@ -44,6 +44,27 @@ class TinyEvalModel(nn.Module):
         }
 
 
+class PrunableEvalModel(nn.Module):
+    def forward(self, points):
+        batch_size = points.shape[0]
+        active = points[:, 0]
+        inactive = active + 100.0
+        return {
+            "decoded_points": torch.stack([active, inactive], dim=1),
+            "decoded_weights": torch.ones(batch_size, 2, dtype=points.dtype, device=points.device),
+            "surface_points": points[:, :2],
+            "part_ids": torch.tensor([0, 1], device=points.device),
+            "scale": torch.ones(batch_size, 2, 3, dtype=points.dtype, device=points.device),
+            "shape": torch.ones(batch_size, 2, 2, dtype=points.dtype, device=points.device),
+            "rotate": torch.eye(3, dtype=points.dtype, device=points.device)
+            .view(1, 1, 3, 3)
+            .repeat(batch_size, 2, 1, 1),
+            "trans": torch.zeros(batch_size, 2, 3, dtype=points.dtype, device=points.device),
+            "exist": torch.tensor([[[0.9], [0.1]]], dtype=points.dtype, device=points.device)
+            .repeat(batch_size, 1, 1),
+        }
+
+
 class TinyLoss:
     def __call__(self, batch, outdict):
         return torch.tensor(0.25), {
@@ -101,6 +122,10 @@ def _cfg(tmp_path):
             max_batches=None,
             compute_loss_metrics=True,
             compute_paper_metrics=True,
+            f_score_threshold=0.01,
+            prune_decoded_points=False,
+            prune_exist_threshold=0.5,
+            prune_target_count=None,
         ),
         visualization=SimpleNamespace(
             enabled=True,
@@ -132,6 +157,7 @@ def test_evaluator_writes_metrics_and_twenty_category_visualizations(tmp_path):
     assert result["num_visualizations"] == 20
     assert result["visualized_categories"] == ["a", "b", "c", "d", "e"]
     assert "paper_chamfer_l1" in result["metrics"]
+    assert "paper_f_score_tau_0_01" in result["metrics"]
     assert "recon" in result["metrics"]
 
     metadata_paths = sorted((tmp_path / "viz").glob("test/sample_*/metadata.json"))
@@ -140,3 +166,82 @@ def test_evaluator_writes_metrics_and_twenty_category_visualizations(tmp_path):
     assert {item["category"] for item in metadata} == {"a", "b", "c", "d", "e"}
     assert all(item["checkpoint"] == "checkpoint.pt" for item in metadata)
 
+
+def test_evaluator_uses_configured_fscore_threshold(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.compute_loss_metrics = False
+    cfg.eval.f_score_threshold = 0.03
+    cfg.visualization.enabled = False
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=TinyEvalModel(),
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=None,
+    )
+
+    result = evaluator.evaluate()
+
+    assert "paper_f_score_tau_0_03" in result["metrics"]
+    assert "paper_f_score_tau_0_01" not in result["metrics"]
+
+
+def test_evaluator_computes_paper_metrics_on_pruned_decoded_points(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.compute_loss_metrics = False
+    cfg.eval.prune_decoded_points = True
+    cfg.eval.prune_target_count = 1
+    cfg.visualization.enabled = False
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=PrunableEvalModel(),
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=None,
+    )
+
+    result = evaluator.evaluate()
+
+    assert result["metrics"]["paper_chamfer_l1"] == 0.0
+    assert result["metrics"]["paper_chamfer_l2"] == 0.0
+
+
+def test_evaluator_sends_pruned_decoded_points_to_visualizer(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    class CaptureVisualizer:
+        def __init__(self):
+            self.decoded_shape = None
+
+        def write_epoch(self, batch, outdict, epoch, split, num_samples):
+            self.decoded_shape = tuple(outdict["decoded_points"].shape)
+            return TinyVisualizer(tmp_path / "viz").write_epoch(
+                batch,
+                outdict,
+                epoch,
+                split,
+                num_samples,
+            )
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.prune_decoded_points = True
+    cfg.eval.prune_target_count = 1
+    cfg.visualization.num_samples = 1
+    cfg.visualization.min_categories = 1
+    cfg.visualization.samples_per_category = 1
+    visualizer = CaptureVisualizer()
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=PrunableEvalModel(),
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=visualizer,
+    )
+
+    evaluator.evaluate()
+
+    assert visualizer.decoded_shape == (1, 1, 3)

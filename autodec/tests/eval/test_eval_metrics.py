@@ -1,7 +1,7 @@
 import torch
 
 
-def test_paper_chamfer_metrics_are_symmetric_and_named():
+def test_paper_chamfer_metrics_include_scaled_chamfer_and_fscore():
     from autodec.eval.metrics import paper_chamfer_metrics
 
     pred = torch.tensor(
@@ -23,9 +23,35 @@ def test_paper_chamfer_metrics_are_symmetric_and_named():
 
     metrics = paper_chamfer_metrics(pred, target)
 
-    assert set(metrics) == {"paper_chamfer_l1", "paper_chamfer_l2"}
+    assert set(metrics) == {
+        "paper_chamfer_l1",
+        "paper_chamfer_l2",
+        "paper_chamfer_l1_x100",
+        "paper_chamfer_l2_x100",
+        "paper_precision_tau_0_01",
+        "paper_recall_tau_0_01",
+        "paper_f_score_tau_0_01",
+    }
     assert metrics["paper_chamfer_l1"] == torch.tensor(0.5)
     assert metrics["paper_chamfer_l2"] == torch.tensor(0.5)
+    assert metrics["paper_chamfer_l1_x100"] == torch.tensor(50.0)
+    assert metrics["paper_chamfer_l2_x100"] == torch.tensor(50.0)
+    assert metrics["paper_precision_tau_0_01"] == torch.tensor(0.5)
+    assert metrics["paper_recall_tau_0_01"] == torch.tensor(0.5)
+    assert metrics["paper_f_score_tau_0_01"] == torch.tensor(0.5)
+
+
+def test_paper_chamfer_metrics_accept_custom_fscore_threshold():
+    from autodec.eval.metrics import paper_chamfer_metrics
+
+    pred = torch.tensor([[[0.0, 0.0, 0.0]]])
+    target = torch.tensor([[[0.02, 0.0, 0.0]]])
+
+    strict = paper_chamfer_metrics(pred, target, f_score_threshold=0.01)
+    loose = paper_chamfer_metrics(pred, target, f_score_threshold=0.03)
+
+    assert strict["paper_f_score_tau_0_01"] == torch.tensor(0.0)
+    assert loose["paper_f_score_tau_0_03"] == torch.tensor(1.0)
 
 
 def test_metric_averager_keeps_stable_float_keys():
@@ -42,4 +68,3 @@ def test_metric_averager_keeps_stable_float_keys():
         "offset_ratio": 4.0,
         "recon": 5.0 / 3.0,
     }
-
