@@ -94,6 +94,26 @@ class ResidualEchoOffsetDecoder(nn.Module):
         return offsets
 
 
+class ConstantOffsetDecoder(nn.Module):
+    def __init__(self, value):
+        super().__init__()
+        self.value = float(value)
+
+    def forward(self, point_features, primitive_tokens, return_attention=False):
+        offsets = point_features.new_full(
+            (point_features.shape[0], point_features.shape[1], 3),
+            self.value,
+        )
+        if return_attention:
+            attention = point_features.new_ones(
+                point_features.shape[0],
+                point_features.shape[1],
+                1,
+            )
+            return offsets, attention
+        return offsets
+
+
 def test_autodec_decoder_return_consistency_uses_zero_residual_pass():
     from autodec.decoder import AutoDecDecoder
 
@@ -118,3 +138,55 @@ def test_autodec_decoder_return_consistency_uses_zero_residual_pass():
     assert torch.allclose(out["decoded_offsets"][..., 0], torch.ones(1, 4))
     assert torch.allclose(out["consistency_decoded_offsets"][..., 0], torch.zeros(1, 4))
     assert torch.allclose(out["consistency_decoded_points"], out["surface_points"])
+
+
+def test_autodec_decoder_scale_caps_offsets_per_primitive():
+    from autodec.decoder import AutoDecDecoder
+
+    decoder = AutoDecDecoder(
+        residual_dim=4,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        offset_cap=0.3,
+        angle_sampler=FixedAngleSampler(),
+    )
+    decoder.offset_decoder = ConstantOffsetDecoder(10.0)
+    outdict = _encoder_outdict()
+    outdict["scale"] = torch.tensor([[[0.3, 0.6, 0.9], [0.03, 0.06, 0.09]]])
+
+    out = decoder(outdict)
+
+    expected_caps = torch.tensor([0.18, 0.18, 0.018, 0.018]).view(1, 4, 1)
+    assert torch.allclose(out["offset_limit"], expected_caps)
+    assert torch.allclose(out["decoded_offsets"], expected_caps.expand_as(out["decoded_offsets"]))
+    assert torch.allclose(
+        out["decoded_points"],
+        out["surface_points"] + out["decoded_weights"].unsqueeze(-1) * out["decoded_offsets"],
+    )
+
+
+def test_autodec_decoder_offset_cap_none_preserves_raw_offsets():
+    from autodec.decoder import AutoDecDecoder
+
+    decoder = AutoDecDecoder(
+        residual_dim=4,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        offset_cap=None,
+        angle_sampler=FixedAngleSampler(),
+    )
+    decoder.offset_decoder = ConstantOffsetDecoder(10.0)
+
+    out = decoder(_encoder_outdict())
+
+    assert torch.allclose(out["decoded_offsets"], torch.full_like(out["decoded_offsets"], 10.0))

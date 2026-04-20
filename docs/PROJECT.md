@@ -179,12 +179,15 @@ Where each row E_j contains: `[s_x, s_y, s_z, ε₁, ε₂, t_x, t_y, t_z, r₁,
 The residual code should encode the fine geometric detail that each superquadric misses. The primitive token F_SQ,j alone is optimized for fitting and segmentation, not for preserving high-frequency local detail. To address this, we first pool the local point features assigned to each primitive, then combine with the primitive token:
 
 ```
-g_j = (Σ_{i=1}^{N} m_ij · F_PC,i) / (Σ_{i=1}^{N} m_ij + ε)     ∈ ℝ^H     (weighted pool of local point evidence)
+g_mean,j = (Σ_i m_ij · F_PC,i) / (Σ_i m_ij + ε)                 ∈ ℝ^H
+g_max,j  = max_i masked_by(m_ij > ε, m_ij · F_PC,i)             ∈ ℝ^H
+g_var,j  = (Σ_i m_ij · (F_PC,i − g_mean,j)^2) / (Σ_i m_ij + ε)  ∈ ℝ^H
 
-Z_j = MLP([F_SQ,j; g_j])                                          ∈ ℝ^d     (MLP: ℝ^{2H} → ℝ^H → ℝ^d)
+Z_j = MLP([F_SQ,j; g_mean,j; g_max,j; g_var,j])                 ∈ ℝ^d
+      (MLP: ℝ^{4H} → ℝ^H → ℝ^d)
 ```
 
-This way each residual token is conditioned both on the primitive query state and on the actual local point features assigned to that primitive. The semicolon denotes concatenation, so the MLP input is ℝ^{2H} = ℝ^{256} for H=128.
+This way each residual token is conditioned both on the primitive query state and on the actual local point features assigned to that primitive. Mean-only pooling was a bottleneck because it erased local feature variation; the implemented multi-statistic pooling preserves average evidence, strong feature responses, and local variance. The semicolon denotes concatenation, so the MLP input is ℝ^{4H} = ℝ^{512} for H=128.
 
 **Design choice: per-part vs. global residual.** We use per-part residuals (one z_j per superquadric) rather than a single global z. This means each primitive carries its own fine-detail code, enabling part-level editing: you can modify one superquadric and its associated z_j without affecting other parts.
 
@@ -223,20 +226,29 @@ Output: X_sq ∈ ℝ^{(P·S_dec)×3}       (coarse point cloud on SQ surfaces)
 
 After soft gating, the effective output can be thought of as N' ≤ P·S_dec active points. This stage is fully differentiable with respect to the SQ parameters in E.
 
-#### Stage 2: Feature Construction (no learned parameters)
+#### Stage 2: Feature Construction (learned split projections)
 
 For each surface point x_sq,i ∈ X_sq, construct a feature vector by concatenating:
 
 ```
-f_i = [p_i ∈ ℝ³,  E_j ∈ ℝ^{12},  z_j ∈ ℝ^d]  ∈ ℝ^{3+12+d}
+γ(p_i) = [p_i, sin(2^kπp_i), cos(2^kπp_i)]_{k=0}^{L−1}
+
+f_i = [
+  Proj_pos(γ(p_i)),
+  Proj_E(E_j),
+  Proj_Z(z_j),
+  Proj_gate(w_i)
+]
 ```
 
 Where j = part_ids[i] is the superquadric that point i was sampled from.
 
 ```
-Input:  X_sq ∈ ℝ^{(P·S_dec)×3}, E ∈ ℝ^{P×12}, Z ∈ ℝ^{P×d}, part_ids
-Output: F_dec ∈ ℝ^{(P·S_dec)×(3+12+d)}     (= ℝ^{4096×79} for d=64)
+Input:  X_sq ∈ ℝ^{(P·S_dec)×3}, E_dec ∈ ℝ^{P×18}, Z ∈ ℝ^{P×d}, w, part_ids
+Output: F_dec ∈ ℝ^{(P·S_dec)×(4·C)}
 ```
+
+`E_dec` uses the actual decoder packing: scale (3), shape (2), translation (3), flattened rotation matrix (9), and existence logit (1), for 18 values. The split projectors use `LayerNorm → Linear → ReLU` for position/Fourier features, E_dec, and Z, and `Linear → ReLU` for the gate. By default `C = max(4, hidden_dim // 4)`; setting `component_feature_dim=0` disables this and recovers the older raw concatenation path.
 
 #### Stage 3: Offset Network (learned, the main decoder component)
 
@@ -255,23 +267,21 @@ Each point is processed independently. No cross-part communication. ~200K parame
 Pros: Simple, fast, easy to debug.
 Cons: Parts don't know about each other; may produce gaps or overlaps at part boundaries.
 
-**Option B — MLP + cross-attention (recommended):**
+**Option B — stacked self-attention + cross-attention (implemented default):**
 
 ```
-F_dec ∈ ℝ^{(P·S_dec)×79}  →  Linear(79 → H)  →  F' ∈ ℝ^{(P·S_dec)×H}
+F_dec → Linear(4C → H)                    → point stream
+T     → Linear(2C → H)                    → primitive tokens
 
-CrossAttention:
-  Q = Linear_Q(F')                        ∈ ℝ^{(P·S_dec) × H}    (from surface point features)
-  K = Linear_K([E_j^proj; Z_j])           ∈ ℝ^{P × H}            (from primitive tokens)
-  V = Linear_V([E_j^proj; Z_j])           ∈ ℝ^{P × H}            (from primitive tokens)
-  Attn = softmax(Q K^T / √H) · V          ∈ ℝ^{(P·S_dec) × H}
-  (attention weight matrix is (P·S_dec) × P)
+repeat K times:
+  within-primitive self-attention(points) → residual + LayerNorm
+  cross-attention(points → primitives)    → residual + LayerNorm
+  FFN(H → 4H → H)                         → residual + LayerNorm
 
-F'' = F' + Attn                            ∈ ℝ^{(P·S_dec) × H}
-F'' → MLP(H → H → 3) → Δ ∈ ℝ^{(P·S_dec)×3}
+MLP(H → H → 3) → Δ_raw ∈ ℝ^{(P·S_dec)×3}
 ```
 
-Each surface point attends to all P primitive tokens, which concatenate explicit parameters E_j (projected to match dim) and residual features Z_j. This gives global context: a point on the seat knows about the backrest and legs. Using [E_j^proj; Z_j] as keys/values rather than Z alone ensures the context channel carries both structural and residual information.
+Each surface point attends to all P primitive tokens, which concatenate projected explicit parameters E_j and residual features Z_j. The implemented default also applies self-attention within each primitive's S_dec sampled points. This gives local smoothing/coordination without the O((P·S_dec)^2) cost of global surface-point self-attention.
 
 ~500K parameters. This is the recommended architecture.
 
@@ -286,6 +296,14 @@ X̂ = X_sq + w ⊙ Δ    ∈ ℝ^{(P·S_dec)×3}
 ```
 
 Where ⊙ denotes element-wise multiplication of each offset by its primitive's soft existence weight (broadcast across xyz). The final point cloud is the coarse SQ surface displaced by the gated offsets.
+
+**Offset magnitude bounding.** The implementation supports the scale-aware cap
+
+```
+Δ = tanh(Δ_raw) · offset_cap · mean(scale_j)
+```
+
+repeated to each surface point from primitive j. The default AutoDec configs use `offset_cap: 0.3`; setting `offset_cap: null` restores the older unbounded behavior. This is preferred over the legacy scalar `offset_scale` because it prevents residual collapse while preserving scale-aware flexibility.
 
 **Cardinality conventions:**
 - **Training:** Always produce a fixed-size tensor X̂ ∈ ℝ^{(P·S_dec)×3} = ℝ^{4096×3}. Soft existence weights modulate the loss, not the tensor size. This avoids variable-length complications during batched training.
@@ -302,7 +320,7 @@ Where ⊙ denotes element-wise multiplication of each offset by its primitive's 
 | Transformer decoder | SuperDec | ✅ Yes | Fine-tuned in Phase 2 |
 | Segmentation head | SuperDec | ✅ Yes | Fine-tuned in Phase 2 |
 | Parameter head | SuperDec | ✅ Yes | Fine-tuned in Phase 2 |
-| Residual projection | **New** | ❌ No | Trained from scratch (MLP: ℝ^{2H} → ℝ^H → ℝ^d) |
+| Residual projection | **New** | ❌ No | Trained from scratch (multi-stat pooling + MLP: ℝ^{4H} → ℝ^H → ℝ^d) |
 | SQ surface sampler | **New** | N/A (no params) | N/A |
 | Offset network | **New** | ❌ No | Trained from scratch |
 
@@ -420,7 +438,7 @@ L_exist = (1/P) Σ_{j=1}^{P}  BCE(α_j, α̂_j)
 
 Where ε_exist is a threshold. We follow the implementation's effective rule, equivalent to requiring roughly 24 assigned points; the paper notation is ambiguous (it defines m̄_j as normalized by N but lists ε_exist = 24, which is inconsistent if interpreted literally). The exact value must be verified against the original code.
 
-### 4.5 Consistency loss (L_cons) — OPTIONAL, add if needed
+### 4.5 Consistency loss (L_cons) — optional, currently disabled by default
 
 Forces the decoder to produce a reasonable coarse shape even without the residual.
 
@@ -434,12 +452,20 @@ L_cons = Chamfer(X̂_coarse, X)
 
 Requires a second forward pass through the decoder per training step.
 
-**When to add:** Monitor `mean(‖Δ‖) / mean(‖X_sq‖)` during training. If this ratio exceeds ~0.3, the residual is taking over and L_cons should be activated.
+The repository now implements the true `Z=0` decoder consistency path. `lambda_cons` is still set to 0.0 in the default configs, so the extra decoder pass is only requested when explicitly enabled.
+
+**Cheaper alternative not currently implemented:** decoder-side residual dropout or Z-dropout during training. With probability p, the decoder receives `Z=0` for the normal reconstruction pass. This approximates the same pressure at lower cost than a second decoder pass, but it does not optimize both full-Z and zero-Z reconstructions in the same step.
+
+**When to add:** Monitor `mean(‖Δ‖) / mean(‖X_sq‖)` during training. If this ratio grows too high, enable `lambda_cons` or add Z-dropout.
 
 ### 4.6 Total loss
 
 ```
-L = L_recon + λ_sq · L_sq + λ_par · L_par + λ_exist · L_exist  [+ λ_cons · L_cons]
+Phase 1:
+  L = L_recon [+ λ_cons · L_cons]
+
+Phase 2:
+  L = L_recon + λ_sq · L_sq + λ_par · L_par + λ_exist · L_exist [+ λ_cons · L_cons]
 ```
 
 **Starting hyperparameters** (inherited from SuperDec where applicable):
@@ -449,7 +475,7 @@ L = L_recon + λ_sq · L_sq + λ_par · L_par + λ_exist · L_exist  [+ λ_cons 
 | λ_sq | 1.0 | Tune based on balance with L_recon |
 | λ_par | 0.06 | SuperDec default |
 | λ_exist | 0.01 | SuperDec default |
-| λ_cons | 0.5 | Only if activated; tune empirically |
+| λ_cons | 0.0 default | Enable only as an ablation; tune empirically |
 
 ---
 
@@ -484,10 +510,10 @@ Use the publicly available SuperDec code and hyperparameters:
 **What is frozen:** All encoder components (PVCNN, Transformer, segmentation head, parameter head).
 
 **What is trained:**
-- Residual projection: weighted pooling + MLP(ℝ^{2H} → ℝ^H → ℝ^d)
+- Residual projection: assignment-weighted mean/max/variance pooling + MLP(ℝ^{4H} → ℝ^H → ℝ^d)
 - Offset network (MLP or cross-attention variant)
 
-**Loss:** `L = L_recon`
+**Loss:** `L = L_recon` by default. `λ_cons · L_cons` can be added in Phase 1 because it depends on decoder outputs and trains the decoder/residual path, even while the SuperDec backbone is frozen.
 
 Since the entire encoder is frozen in this stage, primitive-fitting losses on E and M are constant and do not provide useful gradients to any trainable parameter. This stage isolates decoder learning and avoids destabilizing the pretrained primitive decomposition.
 
@@ -503,7 +529,7 @@ Since the entire encoder is frozen in this stage, primitive-fitting losses on E 
 
 **What is trained:** Everything (encoder + decoder).
 
-**Loss:** `L = L_recon + λ_sq · L_sq + λ_par · L_par + λ_exist · L_exist`
+**Loss:** `L = L_recon + λ_sq · L_sq + λ_par · L_par + λ_exist · L_exist` by default, optionally plus `λ_cons · L_cons`.
 
 L_sq, L_par, and L_exist are now meaningful because the encoder is trainable and these losses provide gradients to the encoder parameters.
 
@@ -520,9 +546,9 @@ L_sq, L_par, and L_exist are now meaningful because the encoder is trainable and
 - Primitive mass entropy: `−Σ_j m̄_j log m̄_j`. Low entropy = concentrated assignment = good.
 - Scaffold vs. offset contribution: Chamfer(X_sq, X) vs. Chamfer(X̂, X). The gap is what the offset adds.
 
-#### Phase 3 (optional): Activate L_cons if needed
+#### Phase 3 (optional): Activate L_cons or Z-dropout if needed
 
-If the offset ratio `mean(‖Δ‖) / mean(‖X_sq‖)` exceeds 0.3 during Phase 2, add L_cons and continue training for ~50 epochs.
+If the offset ratio `mean(‖Δ‖) / mean(‖X_sq‖)` grows too high during Phase 1 or Phase 2, enable the implemented `L_cons` and continue training, or add a cheaper Z-dropout regularizer as a follow-up change.
 
 ### 5.3 LM Optimization
 
@@ -654,8 +680,9 @@ Run the encoder, apply LM to refine E, then decode with the original Z. Report C
 **Mitigation:**
 1. Offset-based decoder (architectural constraint: must start from SQ surfaces).
 2. L_sq (loss-level constraint: SQs must fit the input independently).
-3. L_cons (emergency fallback: decoding with Z=0 must still work).
-4. Monitor offset magnitude ratio during training.
+3. Implement scale-aware offset caps, `tanh(Δ_raw) · cap · mean(scale_j)`, to bound residual displacement relative to primitive size.
+4. L_cons or Z-dropout so decoding with Z=0 still works.
+5. Monitor offset magnitude ratio during training.
 
 ### 8.2 SQ sampling discontinuities
 
@@ -703,31 +730,36 @@ Run the encoder, apply LM to refine E, then decode with the original Z. Report C
 
 ### Step 3: Implement residual projection (Week 2)
 
-- [ ] Implement weighted pooling: g_j = Σ m_ij F_PC,i / (Σ m_ij + ε)
-- [ ] Implement MLP([F_SQ,j; g_j]) → Z_j ∈ ℝ^d
+- [x] Implement weighted mean pooling: g_j = Σ m_ij F_PC,i / (Σ m_ij + ε)
+- [x] Add masked max and weighted variance statistics
+- [x] Implement MLP([F_SQ,j; g_mean,j; g_max,j; g_var,j]) → Z_j ∈ ℝ^d
 - [ ] Verify output shape: Z ∈ ℝ^{P×d}
 - [ ] Wire into the training loop
 
-### Step 4: Implement offset decoder — Option A (Week 2–3)
+### Step 4: Implement offset decoder (Week 2–3)
 
-- [ ] Implement simple MLP decoder: ℝ^{(3+12+d)} → ℝ^{256} → ℝ^{256} → ℝ^{3}
-- [ ] Implement feature construction (concatenate p_i, E_j, z_j)
-- [ ] Implement X̂ = X_sq + w⊙Δ (gated offsets)
+- [x] Add Fourier features for sampled SQ surface coordinates
+- [x] Add split projections for position, E_dec, Z, and gate
+- [x] Implement stacked offset decoder with within-primitive self-attention, primitive cross-attention, and FFN blocks
+- [x] Add primitive-scale offset cap: `tanh(raw) * offset_cap * mean(scale_j)`
+- [x] Implement X̂ = X_sq + w⊙Δ (gated offsets)
 - [ ] Implement L_recon (bidirectional weighted Chamfer-L2)
 - [ ] Train Phase 1 (frozen encoder, L_recon only) and evaluate
 
-### Step 5: Evaluate baseline decoder (Week 3–4)
+### Step 5: Evaluate decoder variants (Week 3–4)
 
 - [ ] Measure Chamfer-L1/L2 on ShapeNet val set
 - [ ] Compare vs. SuperDec (SQ-only) and vs. FoldingNet
 - [ ] Visualize reconstructions qualitatively
 - [ ] Monitor offset magnitude ratio
-- [ ] Decide: is MLP sufficient, or do we need cross-attention?
+- [ ] Compare the current stacked attention decoder against a simpler MLP baseline if needed
 
-### Step 6: Implement offset decoder — Option B if needed (Week 4–5)
+### Step 6: Residual-collapse regularization (Week 4–5)
 
-- [ ] Add cross-attention layer (queries = surface point features, keys/values = [E^proj; Z])
-- [ ] Retrain Phase 1 and compare with MLP-only
+- [x] Add true `L_cons` path using a second decoder pass with `Z=0`
+- [ ] Keep `lambda_cons=0.0` by default and enable only as an ablation
+- [ ] Optionally add training-time Z-dropout as a cheaper alternative
+- [ ] Retrain Phase 1 and compare with and without `L_cons` / Z-dropout
 
 ### Step 7: Joint fine-tuning — Phase 2 (Week 5–6)
 

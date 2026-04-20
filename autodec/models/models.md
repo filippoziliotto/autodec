@@ -472,13 +472,21 @@ Offset output:
 offsets [B, M, 3]
 ```
 
-If `offset_scale` is set:
+If `offset_scale` is set inside this lower-level module:
 
 ```text
 offsets = offset_scale * tanh(offsets)
 ```
 
-This optional bound is disabled by default.
+This optional scalar bound is disabled by default. The higher-level
+`AutoDecDecoder` now applies the preferred scale-aware cap when configured:
+
+```text
+offsets = tanh(raw_offsets) * offset_cap * mean(scale_{part(i)})
+```
+
+with default `offset_cap: 0.3` in the AutoDec YAML configs. Set
+`offset_cap: null` to keep the unbounded path.
 
 ### `build_offset_decoder`
 

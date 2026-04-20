@@ -10,15 +10,43 @@
 
 ---
 
+## Current Model Updates Beyond The Original Plan
+
+The repository now includes several architectural updates that were not in the
+first implementation plan:
+
+- The residual projector pools assignment-weighted mean, masked max, and
+  variance point-feature statistics before predicting `Z`. Its MLP input is
+  `4H`, not the older `2H` mean-only input.
+- The decoder keeps raw sampled SQ coordinates and concatenates Fourier
+  features before projection.
+- The decoder uses split projections for position/Fourier features, `E_dec`,
+  residual `Z`, and the existence gate. Set `component_feature_dim=0` to recover
+  the older raw concatenation path.
+- The offset decoder is a stack of attention blocks: optional within-primitive
+  self-attention, primitive cross-attention, and FFN, each with residual +
+  LayerNorm.
+- `lambda_cons` now uses a true no-residual decoder pass,
+  `decoder(E_dec, Z=0)`, and remains disabled by default in YAML configs.
+- Primitive-scale offset caps are implemented in `AutoDecDecoder`. The default
+  YAML configs use `offset_cap: 0.3`; set `offset_cap: null` to restore the
+  older unbounded offset behavior. Legacy scalar `offset_scale` still exists
+  for compatibility when `offset_cap` is disabled.
+- Training-time Z-dropout/residual dropout is not implemented. It remains a
+  cheaper alternative or complement to the true second-pass consistency loss.
+
 ## What Changed In The Updated `PROJECT.md`
 
 The newer spec changes the implementation plan in several concrete ways:
 
-- Residual tokens are no longer a single linear projection from `F_SQ`. They are:
+- Residual tokens are no longer a single linear projection from `F_SQ`. The
+  current implementation uses multi-statistic assignment pooling:
 
   ```text
-  g_j = sum_i m_ij * F_PC,i / (sum_i m_ij + eps)
-  z_j = MLP([F_SQ,j; g_j])
+  g_mean,j = sum_i m_ij * F_PC,i / (sum_i m_ij + eps)
+  g_max,j  = masked max_i m_ij * F_PC,i
+  g_var,j  = sum_i m_ij * (F_PC,i - g_mean,j)^2 / (sum_i m_ij + eps)
+  z_j      = MLP([F_SQ,j; g_mean,j; g_max,j; g_var,j])
   ```
 
   So the encoder must expose both point features `F_PC`, primitive features `F_SQ`, and assignment matrix `M`.
@@ -343,19 +371,21 @@ Responsibilities:
   ```python
   mass = assign_matrix.sum(dim=1).clamp_min(eps)       # [B, P]
   pooled = torch.einsum("bnp,bnh->bph", assign_matrix, point_features)
-  pooled = pooled / mass.unsqueeze(-1)
+  mean = pooled / mass.unsqueeze(-1)
+  max_features = masked_max(assign_matrix * point_features)
+  var = sum_i assign_matrix * (point_features - mean)^2 / mass
   ```
 
-- Concatenate pooled features with SQ query features:
+- Concatenate pooled statistics with SQ query features:
 
   ```python
-  x = torch.cat([sq_features, pooled], dim=-1)         # [B, P, 2H]
+  x = torch.cat([sq_features, mean, max_features, var], dim=-1)  # [B, P, 4H]
   ```
 
 - Apply MLP:
 
   ```python
-  Linear(2H, H) -> ReLU -> Linear(H, d)
+  Linear(4H, H) -> ReLU -> Linear(H, d)
   ```
 
 Class:
@@ -435,14 +465,32 @@ New file.
 
 Responsibilities:
 
-- Implement `OffsetMLPDecoder` first:
+- Implement the current `CrossAttentionOffsetDecoder`:
 
   ```text
-  input dim = point 3 + E_dec 18 + Z 64 + gate 1 = 86
-  MLP(86 -> 256 -> 256 -> 3)
+  point input dim     = 4 * component_feature_dim by default
+  primitive token dim = 2 * component_feature_dim by default
   ```
 
-- Implement `CrossAttentionOffsetDecoder` only after the MLP baseline is measured.
+- Preserve the legacy raw path when `component_feature_dim=0`:
+
+  ```text
+  point dim     = position_features + E_dec 18 + Z + gate 1
+  primitive dim = E_dec 18 + Z
+  ```
+
+- Stack `n_blocks` attention blocks. Each block may run within-primitive
+  self-attention on `[B * P, S, H]`, then cross-attention from sampled points to
+  primitive tokens, then an FFN.
+
+- Keep scalar `offset_scale` support for compatibility, but prefer the
+  implemented primitive-scale caps:
+
+  ```text
+  offsets = tanh(raw_offsets) * offset_cap * mean(scale_{part(i)})
+  ```
+
+  where the default YAML value is `offset_cap: 0.3`.
 
 Output convention:
 
@@ -480,7 +528,7 @@ class AutoDec(nn.Module):
         )
         sample = self.surface_sampler(enc)
         e_dec = pack_decoder_primitive_features(enc)
-        features = cat(sample.flat_points, E_by_point, Z_by_point, gate)
+        features = decoder_feature_builder(sample.flat_points, E_by_point, Z_by_point, gate)
         offsets = self.offset_decoder(features)
         decoded = sample.flat_points + sample.weights.unsqueeze(-1) * offsets
         enc.update({...})
@@ -495,6 +543,7 @@ surface_points:    [B, P*S, 3]
 decoded_offsets:   [B, P*S, 3]
 decoded_weights:   [B, P*S]
 decoded_points:    [B, P*S, 3]
+consistency_decoded_points: [B, P*S, 3] only when return_consistency=True
 part_ids:          [P*S]
 E_dec:             [B, P, 18]
 E_ser:             [B, P, 13] or documented alternative
@@ -553,7 +602,10 @@ Responsibilities:
 
 - Phase 1: `L = L_recon`.
 - Phase 2: `L = L_recon + lambda_sq L_sq + lambda_par/L_exist through SQRegularizer`.
-- Optional: add `L_cons` only if offset ratio indicates residual collapse.
+- Optional: add `L_cons` in either phase when `lambda_cons > 0`. It must use
+  `consistency_decoded_points` from a second decoder pass with `Z=0`, not raw
+  `surface_points`.
+- Keep `scaffold_chamfer` as a no-grad diagnostic metric.
 - Log:
 
   ```text
@@ -759,11 +811,18 @@ part_ids:    [P*S]
 - Create: `autodec/models/offset_decoder.py`
 - Test: `tests/autodec/models/test_offset_decoder.py`
 
-- [ ] Implement MLP decoder first.
-- [ ] Input dimension for default d=64 is 86.
-- [ ] Return raw offsets `[B, P*S, 3]`.
-- [ ] Do offset gating in `AutoDec`, not inside the decoder.
-- [ ] Add cross-attention class as a stub or later implementation.
+- [x] Implement stacked cross-attention decoder.
+- [x] Add Fourier surface-point features in `AutoDecDecoder`.
+- [x] Add split projections for position, E_dec, Z, and gate.
+- [x] Add primitive-scale cap:
+
+```text
+offsets = tanh(raw_offsets) * cap * mean_scale_per_point
+```
+
+- [x] Return decoded offsets `[B, P*S, 3]` before existence gating.
+- [x] Do offset gating in `AutoDec`, not inside the decoder.
+- [x] Add cross-attention class with within-primitive self-attention blocks.
 
 ### Task 8: Implement Full `AutoDec`
 
@@ -781,6 +840,8 @@ decoded_points = surface_points + weights.unsqueeze(-1) * decoded_offsets
 ```
 
 - [ ] Return all training keys.
+- [x] Support `return_consistency=True`, which decodes the same sampled surface
+  with `residual = 0`.
 - [ ] Add `freeze_encoder()` and `unfreeze_encoder()`.
 - [ ] Add `decoder_parameters()` yielding residual projector and offset decoder params.
 - [ ] Test full forward shapes.
@@ -914,9 +975,14 @@ autodec:
   n_surface_samples: 256
   exist_tau: 1.0
   decoder:
-    type: mlp
-    hidden_dim: 256
+    hidden_dim: 128
+    n_heads: 4
+    positional_frequencies: 6
+    component_feature_dim: null
+    n_blocks: 2
+    self_attention_mode: within_primitive
     offset_scale: null
+    offset_cap: 0.3
 
 dataset: shapenet
 shapenet:
@@ -942,11 +1008,13 @@ optimizer:
 
 loss:
   type: autodec
-  phase: decoder_warmup
-  w_recon: 1.0
-  w_sq: 0.0
-  w_offset: 0.0
-  use_decoded_weights: true
+  phase: 1
+  lambda_sq: 0.0
+  lambda_par: 0.0
+  lambda_exist: 0.0
+  lambda_cons: 0.0
+  n_sq_samples: 256
+  min_backward_weight: 1e-3
 ```
 
 ### `configs/autodec/train_phase2.yaml`
@@ -962,18 +1030,13 @@ checkpoints:
 
 loss:
   type: autodec
-  phase: joint
-  w_recon: 1.0
-  w_sq: 1.0
-  w_offset: 0.0
-  w_cons: 0.0
-  use_decoded_weights: true
-  sq_loss:
-    n_samples: 500
-    w_sps: 0.06
-    w_ext: 0.01
-    w_cub: 0.0
-    w_cd: 1.0
+  phase: 2
+  lambda_sq: 1.0
+  lambda_par: 0.06
+  lambda_exist: 0.01
+  lambda_cons: 0.0
+  n_sq_samples: 256
+  min_backward_weight: 1e-3
 ```
 
 ## Verification Checklist

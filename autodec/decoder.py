@@ -21,15 +21,21 @@ class AutoDecDecoder(nn.Module):
         exist_tau=1.0,
         angle_sampler=None,
         offset_scale=None,
+        offset_cap=None,
         positional_frequencies=6,
         component_feature_dim=None,
         n_blocks=2,
         self_attention_mode="within_primitive",
     ):
         super().__init__()
+        if offset_cap is not None and offset_scale is not None:
+            raise ValueError("offset_cap and offset_scale are mutually exclusive")
         self.residual_dim = residual_dim
         self.primitive_dim = primitive_dim
         self.n_surface_samples = n_surface_samples
+        self.offset_cap = None if offset_cap is None else float(offset_cap)
+        if self.offset_cap is not None and self.offset_cap < 0:
+            raise ValueError("offset_cap must be non-negative")
         self.positional_frequencies = int(positional_frequencies)
         if self.positional_frequencies < 0:
             raise ValueError("positional_frequencies must be non-negative")
@@ -163,6 +169,14 @@ class AutoDecDecoder(nn.Module):
             attention = None
         return decoder_features, primitive_tokens, component_features, offsets, attention
 
+    def _apply_offset_cap(self, offsets, scale, part_ids):
+        if self.offset_cap is None:
+            return offsets, None
+        mean_scale = scale.mean(dim=-1, keepdim=True)
+        mean_scale_per_point = repeat_by_part_ids(mean_scale, part_ids)
+        offset_limit = self.offset_cap * mean_scale_per_point
+        return offsets.tanh() * offset_limit, offset_limit
+
     def forward(self, outdict, return_attention=False, return_consistency=False):
         sample = self.surface_sampler(outdict)
         primitive_features = pack_decoder_primitive_features(outdict)
@@ -177,6 +191,11 @@ class AutoDecDecoder(nn.Module):
             gates,
             sample.part_ids,
             return_attention=return_attention,
+        )
+        offsets, offset_limit = self._apply_offset_cap(
+            offsets,
+            outdict["scale"],
+            sample.part_ids,
         )
 
         decoded_points = sample.flat_points + gates * offsets
@@ -196,6 +215,8 @@ class AutoDecDecoder(nn.Module):
                 "decoded_points": decoded_points,
             }
         )
+        if offset_limit is not None:
+            result["offset_limit"] = offset_limit
         result.update(component_features)
         if attention is not None:
             result["decoder_attention"] = attention
@@ -206,6 +227,11 @@ class AutoDecDecoder(nn.Module):
                 primitive_features,
                 zero_residual,
                 gates,
+                sample.part_ids,
+            )
+            consistency_offsets, _ = self._apply_offset_cap(
+                consistency_offsets,
+                outdict["scale"],
                 sample.part_ids,
             )
             result["consistency_decoded_offsets"] = consistency_offsets

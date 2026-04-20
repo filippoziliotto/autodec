@@ -277,6 +277,7 @@ component_feature_dim = None
 n_blocks           = 2
 self_attention_mode = within_primitive
 offset_scale       = None
+offset_cap         = None
 ```
 
 Input keys:

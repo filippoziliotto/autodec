@@ -86,8 +86,9 @@ points [B, N, 3]
   -> AutoDecDecoder
      -> sampled SQ surface points [B, M, 3]
      -> decoded weights [B, M]
-     -> decoder point features [B, M, 3 + 18 + D + 1]
-     -> primitive attention tokens [B, P, 18 + D]
+     -> Fourier position features [B, M, 3 + 6F]
+     -> split projected decoder point features [B, M, 4C]
+     -> split projected primitive attention tokens [B, P, 2C]
      -> decoded offsets [B, M, 3]
      -> decoded points [B, M, 3]
   -> AutoDecLoss
@@ -114,7 +115,7 @@ E_dec_j = [
 E_dec_j has 18 values.
 ```
 
-For `D=64`, each decoded surface-point feature has:
+With `component_feature_dim=0`, the legacy raw decoder path has:
 
 ```text
 3 + 18 + 64 + 1 = 86 channels
@@ -125,6 +126,11 @@ and each primitive attention token has:
 ```text
 18 + 64 = 82 channels
 ```
+
+The default path uses split projections instead. With `hidden_dim=128`,
+`component_feature_dim=None` resolves to `C=32`, so decoded surface-point
+features have `4C=128` channels and primitive attention tokens have `2C=64`
+channels.
 
 ## Encoder: `autodec/encoder.py`
 
@@ -650,7 +656,8 @@ mass = clamp_min(mass, eps)
 eps  = 1e-6 by default
 ```
 
-Then it pools point features into each primitive:
+Then it pools point features into each primitive. The mean-only diagnostic
+helper is:
 
 ```text
 g_{b,j,h} = sum_i M_{b,i,j} * F_PC_{b,i,h} / mass_{b,j}
@@ -666,20 +673,23 @@ pooled = pooled / mass.unsqueeze(-1)
 Shape:
 
 ```text
-pooled_features = g [B, P, H]
+pooled_features = g_mean [B, P, H]
 ```
 
 The residual input is:
 
 ```text
-R_in_{b,j} = concat(F_SQ_{b,j}, g_{b,j})
-R_in       [B, P, 2H]
+g_max,j = max_i masked_by(M_{b,i,j} > eps, M_{b,i,j} * F_PC_{b,i})
+g_var,j = sum_i M_{b,i,j} * (F_PC_{b,i} - g_mean,j)^2 / mass_{b,j}
+
+R_in_{b,j} = concat(F_SQ_{b,j}, g_mean,j, g_max,j, g_var,j)
+R_in       [B, P, 4H]
 ```
 
 Then a two-layer MLP maps it to the residual latent:
 
 ```text
-Linear(2H -> hidden_dim)
+Linear(4H -> hidden_dim)
 ReLU
 Linear(hidden_dim -> D)
 ```
@@ -696,7 +706,7 @@ This is the main AutoDec addition to the SuperDec encoder. It gives each
 primitive a local neural residual that is conditioned on:
 
 1. the primitive query state `F_SQ`, and
-2. the point evidence assigned to that primitive through `M`.
+2. the mean, max, and variance of point evidence assigned to that primitive through `M`.
 
 ### Encoder Output Dictionary
 
@@ -747,6 +757,11 @@ AutoDecDecoder(
     exist_tau=1.0,
     angle_sampler=None,
     offset_scale=None,
+    offset_cap=None,
+    positional_frequencies=6,
+    component_feature_dim=None,
+    n_blocks=2,
+    self_attention_mode="within_primitive",
 )
 ```
 
@@ -760,11 +775,24 @@ point_feature_dim = 3 + primitive_dim + D + 1
 primitive_token_dim = primitive_dim + D
 ```
 
+Those are the legacy dimensions when `component_feature_dim=0` and
+`positional_frequencies=0`. The default path uses Fourier features and split
+projections:
+
+```text
+position_feature_dim = 3 + 6 * positional_frequencies
+component_feature_dim = max(4, hidden_dim // 4) if None
+point_feature_dim = 4 * component_feature_dim
+primitive_token_dim = 2 * component_feature_dim
+```
+
 For defaults:
 
 ```text
-point_feature_dim = 3 + 18 + 64 + 1 = 86
-primitive_token_dim = 18 + 64 = 82
+position_feature_dim = 39
+component_feature_dim = 32
+point_feature_dim = 128
+primitive_token_dim = 64
 ```
 
 Submodules:
@@ -776,7 +804,7 @@ self.offset_decoder  = CrossAttentionOffsetDecoder(...)
 
 ### Decoder Input
 
-`AutoDecDecoder.forward(outdict, return_attention=False)` expects the encoder
+`AutoDecDecoder.forward(outdict, return_attention=False, return_consistency=False)` expects the encoder
 dictionary to contain:
 
 ```text
@@ -1068,9 +1096,8 @@ Inside `AutoDecDecoder.forward`:
 sample = self.surface_sampler(outdict)
 primitive_features = pack_decoder_primitive_features(outdict)
 residual = outdict["residual"]
+position_features = self.surface_position_features(sample.flat_points)
 
-point_primitive_features = repeat_by_part_ids(primitive_features, sample.part_ids)
-point_residual = repeat_by_part_ids(residual, sample.part_ids)
 gates = sample.weights.unsqueeze(-1)
 ```
 
@@ -1078,62 +1105,74 @@ Shapes:
 
 ```text
 sample.flat_points         [B, M, 3]
+position_features          [B, M, 3 + 6F]
 primitive_features         [B, P, 18]
 residual                   [B, P, D]
-point_primitive_features   [B, M, 18]
-point_residual             [B, M, D]
 gates                      [B, M, 1]
 ```
 
-The point-level decoder feature is:
+The default point-level decoder feature is built from separate projected
+components:
 
 ```text
-f_i = concat(p_sq_i, E_dec_{part(i)}, Z_{part(i)}, w_i)
+Proj_pos(position_features_i)
+Proj_E(E_dec_{part(i)})
+Proj_Z(Z_{part(i)})
+Proj_gate(w_i)
 ```
 
 Code:
 
 ```python
-decoder_features = torch.cat(
-    [sample.flat_points, point_primitive_features, point_residual, gates],
-    dim=-1,
-)
+projected_position = self.position_projector(position_features)
+projected_primitives = self.primitive_feature_projector(primitive_features)
+projected_residual = self.residual_projector(residual)
+projected_gates = self.gate_projector(gates)
+decoder_features = cat(projected_position, projected_E_by_point, projected_Z_by_point, projected_gates)
 ```
 
 Shape:
 
 ```text
-decoder_features [B, M, 3 + 18 + D + 1]
+decoder_features [B, M, 4C]
 ```
 
-For `D=64`:
+For the default `hidden_dim=128`:
 
 ```text
-decoder_features [B, M, 86]
+decoder_features [B, M, 128]
 ```
 
 The primitive-token feature used for cross-attention is:
 
 ```text
-T_j = concat(E_dec_j, Z_j)
+T_j = concat(Proj_E(E_dec_j), Proj_Z(Z_j))
 ```
 
 Code:
 
 ```python
-primitive_tokens = torch.cat([primitive_features, residual], dim=-1)
+primitive_tokens = torch.cat([projected_primitives, projected_residual], dim=-1)
 ```
 
 Shape:
 
 ```text
-primitive_tokens [B, P, 18 + D]
+primitive_tokens [B, P, 2C]
 ```
 
-For `D=64`:
+For the default `hidden_dim=128`:
 
 ```text
-primitive_tokens [B, P, 82]
+primitive_tokens [B, P, 64]
+```
+
+If `component_feature_dim=0`, the decoder disables the split projections and
+uses the older raw concatenation:
+
+```text
+decoder_features = concat(position_features, E_dec_by_point, Z_by_point, gate)
+primitive_tokens = concat(E_dec, Z)
 ```
 
 ## Offset Decoder: `autodec/models/offset_decoder.py`
@@ -1153,6 +1192,8 @@ CrossAttentionOffsetDecoder(
     hidden_dim=128,
     n_heads=4,
     offset_scale=None,
+    n_blocks=1,
+    self_attention_mode="none",
 )
 ```
 
@@ -1161,9 +1202,12 @@ Submodules:
 ```text
 point_proj       Linear(point_in_dim -> hidden_dim)
 primitive_proj   Linear(primitive_in_dim -> hidden_dim)
-cross_attention  nn.MultiheadAttention(hidden_dim, n_heads, batch_first=True)
+blocks           n_blocks x OffsetDecoderBlock
 offset_mlp       Linear(hidden_dim -> hidden_dim), ReLU, Linear(hidden_dim -> 3)
 ```
+
+Each block applies optional within-primitive self-attention, primitive
+cross-attention, and an FFN, each with residual connection and LayerNorm.
 
 ### Offset Decoder Forward
 
@@ -1190,7 +1234,9 @@ K_prims  [B, P, hidden_dim]
 V_prims  [B, P, hidden_dim]
 ```
 
-The PyTorch attention call is:
+For each block, when `self_attention_mode="within_primitive"`, sampled points
+are reshaped to `[B * P, S, H]` and self-attended within their parent primitive.
+Then the PyTorch cross-attention call is:
 
 ```python
 attended, attention_weights = self.cross_attention(
@@ -1223,11 +1269,11 @@ external contract is:
 attended [B, M, hidden_dim]
 ```
 
-The residual offset head receives a point-local plus attended representation:
+The residual offset head receives the final point representation after all
+attention blocks:
 
 ```text
-h_i = point_hidden_i + attended_i
-Delta_i_raw = offset_mlp(h_i)
+Delta_i_raw = offset_mlp(point_hidden_i)
 ```
 
 Shape:
@@ -1236,13 +1282,26 @@ Shape:
 decoded_offsets [B, M, 3]
 ```
 
-If `offset_scale` is not `None`, the code bounds the offset:
+If `offset_cap` is not `None`, `AutoDecDecoder` applies the preferred
+primitive-scale bound after the offset decoder predicts raw offsets:
+
+```text
+Delta_i = tanh(Delta_i_raw) * offset_cap * mean(scale_{part(i)})
+```
+
+`offset_cap: 0.3` is enabled in the default AutoDec configs. Set
+`offset_cap: null` to keep the older unbounded behavior. The cap is per
+coordinate and scale-aware: points sampled from larger primitives can move
+farther than points sampled from thin primitives.
+
+The older scalar `offset_scale` path is still available for compatibility when
+`offset_cap` is `None`:
 
 ```text
 Delta_i = offset_scale * tanh(Delta_i_raw)
 ```
 
-Otherwise:
+If both `offset_cap` and `offset_scale` are `None`:
 
 ```text
 Delta_i = Delta_i_raw
@@ -1895,10 +1954,13 @@ if phase >= 2:
 
 ### Optional Consistency Term
 
-If `lambda_cons > 0`, the current implementation adds:
+If `lambda_cons > 0`, training/evaluation requests `return_consistency=True`
+from the model. The decoder then runs a second pass over the same sampled SQ
+surface with `Z=0`:
 
 ```text
-L_cons = weighted_chamfer_l2(surface_points, target, decoded_weights)
+consistency_decoded_points = decoder(E_dec, Z=0)
+L_cons = weighted_chamfer_l2(consistency_decoded_points, target, decoded_weights)
 ```
 
 and:
@@ -1907,9 +1969,9 @@ and:
 L += lambda_cons * L_cons
 ```
 
-Important: this is not a second decoder pass with `Z=0`. It is the scaffold
-Chamfer using `surface_points`. This matches the code currently present in
-`_consistency_loss`.
+If `lambda_cons > 0` and `consistency_decoded_points` is absent, the loss raises
+a `ValueError`. `scaffold_chamfer` remains a no-grad diagnostic metric computed
+from raw `surface_points`.
 
 ### Metrics
 
@@ -1935,7 +1997,8 @@ mean_{b,m} ||Delta_{b,m}||_2
 max(mean_{b,m} ||p_sq_{b,m}||_2, eps)
 ```
 
-It uses raw `decoded_offsets`, not gate-multiplied offsets.
+It uses `decoded_offsets` after any configured `offset_cap`/`offset_scale`, but
+before multiplying by the existence gate.
 
 If `surface_points` and `decoded_weights` exist:
 
@@ -2187,11 +2250,13 @@ surface_points_by_part   [8, 16, 256, 3]
 surface_points           [8, 4096, 3]
 decoded_weights          [8, 4096]
 E_dec                    [8, 16, 18]
-decoder_features         [8, 4096, 86]
-primitive_tokens         [8, 16, 82]
+surface_position_features [8, 4096, 39]
+decoder_features         [8, 4096, 128]
+primitive_tokens         [8, 16, 64]
 decoded_offsets          [8, 4096, 3]
 decoded_points           [8, 4096, 3]
 decoder_attention        [8, 4096, 16] if requested
+consistency_decoded_points [8, 4096, 3] if requested
 ```
 
 Loss:
@@ -2213,15 +2278,14 @@ helpers, and checkpoint helpers. The remaining model-level gaps are:
 ```text
 autodec/data/* re-exports
 normal-alignment SQ loss
-true second decoder pass with Z=0 for consistency loss
+training-time Z-dropout or residual dropout
 adaptive sampling per primitive
 training-time paper metrics and pruned training visualizations
 editing/correspondence utilities for part removal, swap, and interpolation
 ```
 
-`lambda_cons` currently reuses scaffold Chamfer as a consistency-style penalty.
-It does not run the full decoder with `residual = 0`, so it is cheaper but not
-identical to the optional consistency loss described in `PROJECT.md`.
+`lambda_cons` now uses the true second decoder pass with `residual = 0` when it
+is enabled. It remains disabled by default in the YAML configs.
 
 ## Correctness Checklist
 
@@ -2236,7 +2300,8 @@ model.
 6. `assign_matrix = softmax(assign_logits, dim=2)`.
 7. AutoDec head returns `exist_logit` and `exist`.
 8. Fallback heads reconstruct `exist_logit = logit(clamp(exist))`.
-9. Residual pooling uses `einsum("bnp,bnh->bph")`.
+9. Residual pooling returns mean diagnostics with `einsum("bnp,bnh->bph")` and
+   feeds mean, masked max, and variance statistics to the residual MLP.
 10. Residual latents have shape `[B, P, D]`.
 11. Decoder primitive code `E_dec` has 18 values, not 12.
 12. Surface sampler detaches only the angle-selection inputs, not the surface
@@ -2245,8 +2310,8 @@ model.
 14. Surface points are transformed by `R * canonical + t`.
 15. Existence weights are `sigmoid(exist_logit / tau)`.
 16. Existence weights are not multiplied into surface coordinates.
-17. Point decoder features are `[surface point, E_dec, residual, gate]`.
-18. Primitive attention tokens are `[E_dec, residual]`.
+17. Point decoder features use `[projected Fourier surface position, projected E_dec, projected residual, projected gate]` by default.
+18. Primitive attention tokens are `[projected E_dec, projected residual]`.
 19. Cross-attention queries are sampled points; keys and values are primitives.
 20. Offsets are gated in `decoded_points = surface_points + w * offsets`.
 21. Reconstruction forward Chamfer is weighted by decoded weights.
@@ -2256,8 +2321,8 @@ model.
 24. Parsimony uses `((mean_j sqrt(mbar_j + 0.01))^2)` averaged across batch.
 25. Existence targets are derived from assignment count threshold `24.0` by
     default.
-26. Phase 1 objective is reconstruction only.
+26. Phase 1 objective is reconstruction only unless `lambda_cons > 0`.
 27. Phase 2 objective adds SQ, parsimony, and existence terms according to
     their lambdas.
-28. Current consistency loss is scaffold Chamfer, not a second `Z=0` decoder
-    pass.
+28. Consistency loss uses `consistency_decoded_points` from a second decoder
+    pass with `Z=0`; scaffold Chamfer is only a diagnostic metric.
