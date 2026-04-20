@@ -52,6 +52,7 @@ class AutoDecTrainer:
         visualize_num_samples=None,
         visualize_split=None,
         log_visualizations_to_wandb=None,
+        metric_logger=None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -66,6 +67,7 @@ class AutoDecTrainer:
         self.is_distributed = is_distributed
         self.train_sampler = train_sampler
         self.visualizer = visualizer
+        self.metric_logger = metric_logger
         self.wandb_visual_log_builder = wandb_visual_log_builder
         self.num_epochs = getattr(ctx, "num_epochs", 1)
         self.save_path = getattr(ctx, "save_path", None)
@@ -190,6 +192,24 @@ class AutoDecTrainer:
         self._log_epoch_visualizations(epoch)
         return metrics
 
+    def _learning_rates(self):
+        return [float(group["lr"]) for group in self.optimizer.param_groups]
+
+    def _log_epoch_metrics(self, epoch, train_metrics, val_metrics, evaluated, val_loss):
+        if self.metric_logger is None or not is_main_process():
+            return
+        self.metric_logger.write(
+            {
+                "epoch": epoch + 1,
+                "epoch_index": epoch,
+                "train": train_metrics,
+                "val": val_metrics if evaluated else None,
+                "evaluated": evaluated,
+                "val_loss": float(val_loss),
+                "lr": self._learning_rates(),
+            }
+        )
+
     def train(self):
         save_every = getattr(self.ctx, "save_every_n_epochs", 1)
         eval_every = getattr(self.ctx, "evaluate_every_n_epochs", 1)
@@ -198,11 +218,19 @@ class AutoDecTrainer:
             os.makedirs(self.save_path, exist_ok=True)
 
         for epoch in range(self.start_epoch, self.num_epochs):
-            self.train_one_epoch(epoch)
+            train_metrics = self.train_one_epoch(epoch)
             do_eval = (epoch + 1) % eval_every == 0 or epoch == self.num_epochs - 1
+            val_metrics = None
             if do_eval:
                 val_metrics = self.evaluate(epoch)
                 val_loss = val_metrics.get("all", val_metrics.get("recon", 0.0))
+            self._log_epoch_metrics(
+                epoch,
+                train_metrics,
+                val_metrics,
+                do_eval,
+                val_loss,
+            )
             do_save = (epoch + 1) % save_every == 0 or epoch == self.num_epochs - 1
             if do_save:
                 self.save_checkpoint(epoch, val_loss)

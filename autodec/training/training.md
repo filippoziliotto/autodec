@@ -339,6 +339,7 @@ visualize_every_n_epochs=None
 visualize_num_samples=None
 visualize_split=None
 log_visualizations_to_wandb=None
+metric_logger=None
 ```
 
 Expected dataloaders:
@@ -394,6 +395,11 @@ log_visualizations_to_wandb
 When `log_visualizations_to_wandb` is true and `wandb_run` is not null, the
 trainer logs the local files as WandB `Object3D`s.
 
+When `metric_logger` is supplied, `train()` writes one JSONL row per epoch after
+the optional validation step. Each row contains the 1-based `epoch`, 0-based
+`epoch_index`, full `train` metrics, full `val` metrics when evaluated,
+`evaluated`, latest `val_loss`, and optimizer learning rates.
+
 Checkpoint saving uses:
 
 ```text
@@ -443,7 +449,8 @@ Responsibilities:
    `cfg.checkpoints.resume_from`.
 7. Wrap model in DDP if needed.
 8. Save the resolved config into the run checkpoint folder.
-9. Run `AutoDecTrainer.train()`.
+9. Build `EpochMetricLogger` when `trainer.log_metrics_to_file` is true.
+10. Run `AutoDecTrainer.train()`.
 
 The entrypoint imports Hydra directly, so actual CLI use still requires
 `hydra-core`.

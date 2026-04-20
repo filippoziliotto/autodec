@@ -97,6 +97,18 @@ visual/sq_mesh
 visual/reconstruction
 ```
 
+Local scalar metrics are also written when:
+
+```yaml
+trainer:
+  log_metrics_to_file: true
+  metrics_log_filename: metrics.jsonl
+```
+
+The file lives under the run checkpoint directory, for example
+`checkpoints/<run_name>/metrics.jsonl`, and contains one JSON object per epoch
+with full `train` and `val` metric dictionaries.
+
 ### `visualization`
 
 Controls local 3D visualization export and optional WandB upload.
@@ -243,6 +255,28 @@ or with the script:
 ```bash
 bash autodec/scripts/run_phase1.sh shapenet.max_train_items=512 shapenet.max_val_items=128
 ```
+
+### `trainer`
+
+Training configs include:
+
+```text
+save_path
+log_metrics_to_file
+metrics_log_filename
+save_every_n_epochs
+evaluate_every_n_epochs
+num_epochs
+batch_size
+num_workers
+augmentations
+occlusions
+force_occlusions
+new_camera_sample
+```
+
+`save_path` is combined with `run_name` by `autodec.training.train`, so local
+metrics and checkpoints are written under `save_path/run_name/`.
 
 ### `optimizer`
 

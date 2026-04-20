@@ -92,6 +92,8 @@ shapenet:
 
 trainer:
   save_path: checkpoints
+  log_metrics_to_file: true
+  metrics_log_filename: metrics.jsonl
   save_every_n_epochs: 1
   evaluate_every_n_epochs: 1
   num_epochs: 1

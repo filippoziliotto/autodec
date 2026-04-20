@@ -16,6 +16,7 @@ from autodec.training.builders import (
     cfg_get,
     set_seed,
 )
+from autodec.training.metric_logger import EpochMetricLogger
 from autodec.training.trainer import AutoDecTrainer, is_main_process
 from autodec.utils.checkpoints import load_autodec_checkpoint
 
@@ -76,6 +77,15 @@ def main(cfg: DictConfig):
     if is_main_process():
         os.makedirs(cfg.trainer.save_path, exist_ok=True)
         OmegaConf.save(cfg, os.path.join(cfg.trainer.save_path, "config.yaml"))
+    metric_logger = None
+    if is_main_process() and cfg_get(cfg.trainer, "log_metrics_to_file", True):
+        metric_logger = EpochMetricLogger(
+            os.path.join(
+                cfg.trainer.save_path,
+                cfg_get(cfg.trainer, "metrics_log_filename", "metrics.jsonl"),
+            ),
+            append=getattr(cfg.checkpoints, "keep_epoch", False),
+        )
 
     trainer = AutoDecTrainer(
         model=model,
@@ -95,6 +105,7 @@ def main(cfg: DictConfig):
         visualize_num_samples=cfg_get(visualization_cfg, "num_samples", 1),
         visualize_split=cfg_get(visualization_cfg, "split", "val"),
         log_visualizations_to_wandb=cfg_get(visualization_cfg, "log_to_wandb", True),
+        metric_logger=metric_logger,
     )
     trainer.train()
 

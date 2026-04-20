@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import torch
@@ -75,6 +76,10 @@ class RecordingWandbRun:
         self.logs.append((payload, step))
 
 
+def _read_jsonl(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
 def test_autodec_trainer_runs_one_train_and_eval_epoch(tmp_path):
     from autodec.training.trainer import AutoDecTrainer
 
@@ -99,6 +104,88 @@ def test_autodec_trainer_runs_one_train_and_eval_epoch(tmp_path):
 
     assert "all" in train_metrics
     assert "all" in val_metrics
+
+
+def test_autodec_trainer_writes_epoch_metrics_after_train_and_eval(tmp_path):
+    from autodec.training.metric_logger import EpochMetricLogger
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": [{"points": torch.ones(2, 3, 3)}],
+    }
+    model = TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    metrics_path = tmp_path / "metrics.jsonl"
+    metric_logger = EpochMetricLogger(metrics_path, append=False)
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=TinyLoss(),
+        ctx=SimpleNamespace(
+            num_epochs=1,
+            save_path=str(tmp_path),
+            save_every_n_epochs=10,
+            evaluate_every_n_epochs=1,
+        ),
+        device=torch.device("cpu"),
+        metric_logger=metric_logger,
+    )
+
+    trainer.train()
+
+    assert metrics_path.exists()
+    rows = _read_jsonl(metrics_path)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["epoch"] == 1
+    assert row["epoch_index"] == 0
+    assert "all" in row["train"]
+    assert "all" in row["val"]
+    assert row["evaluated"] is True
+    assert row["val_loss"] == row["val"]["all"]
+    assert row["lr"] == [0.01]
+
+
+def test_autodec_trainer_logs_train_metrics_when_epoch_is_not_evaluated(tmp_path):
+    from autodec.training.metric_logger import EpochMetricLogger
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": [{"points": torch.ones(2, 3, 3)}],
+    }
+    model = TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    metrics_path = tmp_path / "metrics.jsonl"
+    metric_logger = EpochMetricLogger(metrics_path, append=False)
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=TinyLoss(),
+        ctx=SimpleNamespace(
+            num_epochs=2,
+            save_path=str(tmp_path),
+            save_every_n_epochs=10,
+            evaluate_every_n_epochs=2,
+        ),
+        device=torch.device("cpu"),
+        metric_logger=metric_logger,
+    )
+
+    trainer.train()
+
+    rows = _read_jsonl(metrics_path)
+    assert len(rows) == 2
+    first = rows[0]
+    assert "all" in first["train"]
+    assert first["val"] is None
+    assert first["evaluated"] is False
+    assert first["val_loss"] is None
 
 
 def test_autodec_trainer_logs_visualizations_after_eval_epoch(tmp_path):
