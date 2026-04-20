@@ -418,7 +418,23 @@ Diagnostic for residual/offset dominance:
 mean ||decoded_offsets||_2 / mean ||surface_points||_2
 ```
 
-If either key is missing, returns a zero scalar on the decoded point device.
+This uses decoded offsets after any configured cap or scalar scale, but before
+existence-gate multiplication. `_gated_offset_ratio` applies
+`decoded_weights.unsqueeze(-1)` first:
+
+```text
+mean ||decoded_weights * decoded_offsets||_2 / mean ||surface_points||_2
+```
+
+When `offset_limit` exists, cap diagnostics are also available:
+
+```text
+offset_cap_saturation          mean abs(decoded_offsets) / offset_limit
+offset_cap_saturated_fraction  fraction of components >= 0.95 of offset_limit
+```
+
+If required keys are missing, ratio helpers return a zero scalar on the decoded
+point device; cap diagnostics are omitted when `offset_limit` is absent.
 
 ### `AutoDecLoss`
 
@@ -555,6 +571,9 @@ recon_forward
 recon_backward
 active_weight_sum
 offset_ratio
+gated_offset_ratio
+offset_cap_saturation
+offset_cap_saturated_fraction
 scaffold_chamfer
 primitive_mass_entropy
 active_primitive_count

@@ -52,6 +52,35 @@ def _offset_ratio(outdict, eps=1e-8):
     return offset_norm / scaffold_norm.clamp_min(eps)
 
 
+def _gated_offset_ratio(outdict, eps=1e-8):
+    if (
+        "decoded_offsets" not in outdict
+        or "decoded_weights" not in outdict
+        or "surface_points" not in outdict
+    ):
+        reference = outdict["decoded_points"]
+        return reference.new_tensor(0.0)
+    gated_offsets = outdict["decoded_offsets"] * outdict["decoded_weights"].unsqueeze(-1)
+    offset_norm = gated_offsets.norm(dim=-1).mean()
+    scaffold_norm = outdict["surface_points"].norm(dim=-1).mean()
+    return offset_norm / scaffold_norm.clamp_min(eps)
+
+
+def _offset_cap_saturation(outdict, eps=1e-8, saturation_threshold=0.95):
+    if "decoded_offsets" not in outdict or "offset_limit" not in outdict:
+        return None
+    saturation = (
+        outdict["decoded_offsets"].abs()
+        / outdict["offset_limit"].clamp_min(eps)
+    ).clamp(max=1.0)
+    return {
+        "offset_cap_saturation": saturation.mean(),
+        "offset_cap_saturated_fraction": (
+            saturation >= saturation_threshold
+        ).to(torch.float32).mean(),
+    }
+
+
 class AutoDecLoss(nn.Module):
     """Phase-aware AutoDec loss wrapper."""
 
@@ -136,7 +165,17 @@ class AutoDecLoss(nn.Module):
             "recon_backward": _metric_value(recon_components["backward"]),
             "active_weight_sum": _metric_value(outdict["decoded_weights"].sum(dim=1).mean()),
             "offset_ratio": _metric_value(_offset_ratio(outdict)),
+            "gated_offset_ratio": _metric_value(_gated_offset_ratio(outdict)),
         }
+
+        cap_saturation = _offset_cap_saturation(outdict)
+        if cap_saturation is not None:
+            metrics.update(
+                {
+                    key: _metric_value(value)
+                    for key, value in cap_saturation.items()
+                }
+            )
 
         scaffold_chamfer = self._scaffold_chamfer(outdict, target)
         if scaffold_chamfer is not None:

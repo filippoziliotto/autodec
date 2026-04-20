@@ -1986,6 +1986,7 @@ recon_forward     forward component from weighted_chamfer_l2
 recon_backward    backward component from weighted_chamfer_l2
 active_weight_sum mean_b sum_m decoded_weights_{b,m}
 offset_ratio      mean ||decoded_offsets|| / mean ||surface_points||
+gated_offset_ratio mean ||decoded_weights * decoded_offsets|| / mean ||surface_points||
 all               final weighted objective value
 ```
 
@@ -1999,6 +2000,20 @@ max(mean_{b,m} ||p_sq_{b,m}||_2, eps)
 
 It uses `decoded_offsets` after any configured `offset_cap`/`offset_scale`, but
 before multiplying by the existence gate.
+
+`gated_offset_ratio` applies the soft existence weights first, so it measures
+the displacement actually added in:
+
+```text
+decoded_points = surface_points + decoded_weights * decoded_offsets
+```
+
+When `offset_limit` exists, the loss metrics also include:
+
+```text
+offset_cap_saturation          mean abs(decoded_offsets) / offset_limit
+offset_cap_saturated_fraction  fraction of offset components >= 0.95 of offset_limit
+```
 
 If `surface_points` and `decoded_weights` exist:
 

@@ -86,6 +86,25 @@ def test_autodec_loss_phase2_composes_regularizers_and_metrics():
     assert "scaffold_chamfer" in metrics
 
 
+def test_autodec_loss_logs_gated_offset_ratio_and_cap_saturation():
+    from autodec.losses.autodec_loss import AutoDecLoss
+
+    batch = {"points": torch.zeros(1, 2, 3)}
+    outdict = _outdict()
+    outdict["decoded_points"] = torch.zeros(1, 2, 3)
+    outdict["surface_points"] = torch.tensor([[[2.0, 0.0, 0.0], [2.0, 0.0, 0.0]]])
+    outdict["decoded_offsets"] = torch.tensor([[[2.0, 0.0, 0.0], [0.0, 2.0, 0.0]]])
+    outdict["decoded_weights"] = torch.tensor([[0.5, 0.25]])
+    outdict["offset_limit"] = torch.tensor([[[4.0], [2.0]]])
+
+    _, metrics = AutoDecLoss(phase=1)(batch, outdict)
+
+    assert metrics["offset_ratio"] == 1.0
+    assert abs(metrics["gated_offset_ratio"] - 0.375) < 1e-6
+    assert abs(metrics["offset_cap_saturation"] - 0.25) < 1e-6
+    assert abs(metrics["offset_cap_saturated_fraction"] - (1.0 / 6.0)) < 1e-6
+
+
 def test_autodec_loss_consistency_uses_zero_residual_decoder_points():
     from autodec.losses.autodec_loss import AutoDecLoss
 

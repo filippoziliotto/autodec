@@ -173,7 +173,7 @@ class AutoDecDecoder(nn.Module):
         if self.offset_cap is None:
             return offsets, None
         mean_scale = scale.mean(dim=-1, keepdim=True)
-        mean_scale_per_point = repeat_by_part_ids(mean_scale, part_ids)
+        mean_scale_per_point = repeat_by_part_ids(mean_scale, part_ids).detach()
         offset_limit = self.offset_cap * mean_scale_per_point
         return offsets.tanh() * offset_limit, offset_limit
 

@@ -6,7 +6,17 @@ import torch
 from torch_geometric.nn import fps
 import numpy as np
 from tqdm import tqdm
-mp.set_start_method("spawn", force=True)
+
+# added
+torch.set_num_threads(1)
+#ntorch.set_num_interop_threads(1)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
+########
+
+# mp.set_start_method("spawn", force=True)
+ctx = mp.get_context("spawn")
 
 def process_model(model_path):
     try:
@@ -64,7 +74,8 @@ def main():
         for mpth in tqdm(model_paths, desc="Processing models"):
             results.append(process_model(mpth))
     else:
-        ctx = mp.get_context("fork")
+        # ctx = mp.get_context("fork")
+        ctx = mp.get_context("spawn")
         with ctx.Pool(processes=args.jobs) as pool:
             results = []
             for r in tqdm(pool.imap_unordered(process_model, model_paths), total=total, desc="Processing models"):

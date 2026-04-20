@@ -190,3 +190,29 @@ def test_autodec_decoder_offset_cap_none_preserves_raw_offsets():
     out = decoder(_encoder_outdict())
 
     assert torch.allclose(out["decoded_offsets"], torch.full_like(out["decoded_offsets"], 10.0))
+
+
+def test_autodec_decoder_offset_cap_does_not_backprop_into_scale():
+    from autodec.decoder import AutoDecDecoder
+
+    decoder = AutoDecDecoder(
+        residual_dim=4,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        offset_cap=0.3,
+        angle_sampler=FixedAngleSampler(),
+    )
+    offsets = torch.ones(1, 4, 3, requires_grad=True)
+    scale = torch.ones(1, 2, 3, requires_grad=True)
+    part_ids = torch.tensor([0, 0, 1, 1])
+
+    capped_offsets, _ = decoder._apply_offset_cap(offsets, scale, part_ids)
+    capped_offsets.sum().backward()
+
+    assert offsets.grad is not None
+    assert scale.grad is None
