@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
 
 
 class TinyModel(nn.Module):
@@ -66,6 +67,26 @@ class RecordingVisualizer:
             }
         )
         return ["record"]
+
+
+class CategoryDataset(Dataset):
+    def __init__(self):
+        self.models = [
+            {"category": "a", "model_id": "a0"},
+            {"category": "a", "model_id": "a1"},
+            {"category": "b", "model_id": "b0"},
+            {"category": "c", "model_id": "c0"},
+        ]
+
+    def __len__(self):
+        return len(self.models)
+
+    def __getitem__(self, index):
+        return {
+            "points": torch.ones(3, 3) * float(index),
+            "idx": index,
+            "model_id": self.models[index]["model_id"],
+        }
 
 
 class RecordingWandbRun:
@@ -227,6 +248,46 @@ def test_autodec_trainer_logs_visualizations_after_eval_epoch(tmp_path):
     assert visualizer.calls[0]["split"] == "val"
     assert visualizer.calls[0]["num_samples"] == 2
     assert wandb_run.logs[-1] == ({"visual/gt": ["record"]}, 4)
+
+
+def test_autodec_trainer_logs_one_visualization_per_category_by_default(tmp_path):
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataset = CategoryDataset()
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": DataLoader(dataset, batch_size=2, shuffle=False),
+    }
+    model = TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    visualizer = RecordingVisualizer()
+
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=TinyLoss(),
+        ctx=SimpleNamespace(
+            num_epochs=1,
+            save_path=str(tmp_path),
+            visualize_every_n_epochs=1,
+            visualize_num_samples=1,
+            visualize_samples_per_category=1,
+            visualize_category_balanced=True,
+            visualize_split="val",
+            log_visualizations_to_wandb=False,
+        ),
+        device=torch.device("cpu"),
+        visualizer=visualizer,
+    )
+
+    trainer.evaluate(0)
+
+    call = visualizer.calls[0]
+    assert call["num_samples"] == 3
+    assert call["batch"]["idx"].tolist() == [0, 2, 3]
+    assert call["batch"]["points"].shape[0] == 3
 
 
 def test_autodec_trainer_requests_consistency_pass_only_when_loss_needs_it(tmp_path):

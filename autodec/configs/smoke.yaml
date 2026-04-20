@@ -13,6 +13,8 @@ visualization:
   root_dir: data/viz
   every_n_epochs: 1
   num_samples: 1
+  category_balanced: true
+  samples_per_category: 1
   split: val
   log_to_wandb: true
   mesh_resolution: 8

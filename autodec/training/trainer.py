@@ -1,7 +1,11 @@
+import json
 import os
+from collections import defaultdict
 from pathlib import Path
 
 import torch
+from torch.utils.data import Subset
+from torch.utils.data._utils.collate import default_collate
 from tqdm import tqdm
 
 from autodec.utils.checkpoints import save_autodec_checkpoint
@@ -53,6 +57,8 @@ class AutoDecTrainer:
         visualize_split=None,
         log_visualizations_to_wandb=None,
         metric_logger=None,
+        visualize_category_balanced=None,
+        visualize_samples_per_category=None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -82,12 +88,24 @@ class AutoDecTrainer:
             else getattr(ctx, "visualize_num_samples", 1)
         )
         self.visualize_split = (
-            visualize_split if visualize_split is not None else getattr(ctx, "visualize_split", "val")
+            visualize_split
+            if visualize_split is not None
+            else getattr(ctx, "visualize_split", "val")
         )
         self.log_visualizations_to_wandb = (
             log_visualizations_to_wandb
             if log_visualizations_to_wandb is not None
             else getattr(ctx, "log_visualizations_to_wandb", True)
+        )
+        self.visualize_category_balanced = (
+            visualize_category_balanced
+            if visualize_category_balanced is not None
+            else getattr(ctx, "visualize_category_balanced", True)
+        )
+        self.visualize_samples_per_category = (
+            visualize_samples_per_category
+            if visualize_samples_per_category is not None
+            else getattr(ctx, "visualize_samples_per_category", 1)
         )
 
     def save_checkpoint(self, epoch, val_loss):
@@ -164,16 +182,22 @@ class AutoDecTrainer:
         was_training = self.model.training
         self.model.eval()
         try:
-            batch = next(iter(loader))
+            batch, selected_samples = self._visualization_batch(loader)
             batch = move_batch_to_device(batch, self.device)
             outdict = self.model(batch["points"].float())
+            num_samples = (
+                len(selected_samples)
+                if selected_samples
+                else self.visualize_num_samples
+            )
             records = self.visualizer.write_epoch(
                 batch=batch,
                 outdict=outdict,
                 epoch=epoch,
                 split=self.visualize_split,
-                num_samples=self.visualize_num_samples,
+                num_samples=num_samples,
             )
+            self._annotate_visualization_metadata(records, selected_samples)
             if self.wandb_run is not None and self.log_visualizations_to_wandb and records:
                 self.wandb_run.log(self.wandb_visual_log_builder(records), step=epoch)
             return records
@@ -181,6 +205,67 @@ class AutoDecTrainer:
             return []
         finally:
             self.model.train(was_training)
+
+    def _dataset_model_entries(self, dataset):
+        if isinstance(dataset, Subset):
+            models = getattr(dataset.dataset, "models", None)
+            if models is None:
+                return []
+            return [
+                (local_index, models[int(dataset_index)])
+                for local_index, dataset_index in enumerate(dataset.indices)
+            ]
+        models = getattr(dataset, "models", None)
+        if models is None:
+            return []
+        return list(enumerate(models))
+
+    def _category_visualization_selection(self, dataset):
+        grouped = defaultdict(list)
+        for dataset_index, model in self._dataset_model_entries(dataset):
+            category = model.get("category") if isinstance(model, dict) else None
+            if category is None:
+                continue
+            grouped[category].append(
+                {
+                    "dataset_index": dataset_index,
+                    "category": category,
+                    "model_id": model.get("model_id", str(dataset_index)),
+                }
+            )
+        if not grouped:
+            return []
+        samples_per_category = max(1, int(self.visualize_samples_per_category))
+        selected = []
+        for category in sorted(grouped):
+            selected.extend(grouped[category][:samples_per_category])
+        return selected
+
+    def _visualization_batch(self, loader):
+        dataset = getattr(loader, "dataset", None)
+        if self.visualize_category_balanced and dataset is not None:
+            selected = self._category_visualization_selection(dataset)
+            if selected:
+                items = [dataset[item["dataset_index"]] for item in selected]
+                return default_collate(items), selected
+        return next(iter(loader)), []
+
+    def _annotate_visualization_metadata(self, records, selected_samples):
+        if not selected_samples:
+            return
+        for record, selected in zip(records, selected_samples):
+            metadata_path = getattr(record, "metadata_path", None)
+            if metadata_path is None:
+                continue
+            metadata_path = Path(metadata_path)
+            if not metadata_path.is_file():
+                continue
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata.update(selected)
+            metadata_path.write_text(
+                json.dumps(metadata, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
 
     @torch.no_grad()
     def evaluate(self, epoch):

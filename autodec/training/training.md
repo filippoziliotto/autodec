@@ -340,6 +340,8 @@ visualize_num_samples=None
 visualize_split=None
 log_visualizations_to_wandb=None
 metric_logger=None
+visualize_category_balanced=None
+visualize_samples_per_category=None
 ```
 
 Expected dataloaders:
@@ -388,9 +390,16 @@ The visualization settings are:
 ```text
 visualize_every_n_epochs
 visualize_num_samples
+visualize_category_balanced
+visualize_samples_per_category
 visualize_split
 log_visualizations_to_wandb
 ```
+
+When category balancing is enabled and the visualization split has
+ShapeNet-style `dataset.models` metadata, the trainer builds a deterministic
+batch with `visualize_samples_per_category` samples per category. If metadata is
+missing, it falls back to the old first-batch `visualize_num_samples` path.
 
 When `log_visualizations_to_wandb` is true and `wandb_run` is not null, the
 trainer logs the local files as WandB `Object3D`s.

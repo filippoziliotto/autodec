@@ -105,7 +105,7 @@ records = visualizer.write_epoch(
     outdict=outdict,
     epoch=epoch,
     split="val",
-    num_samples=2,
+    num_samples=1,
 )
 ```
 
@@ -117,6 +117,8 @@ This writes:
   primitive color group.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
 - `metadata.json`: epoch, split, sample index, point counts, active primitive count.
+  Training may add category, model id, and dataset index metadata when
+  category-balanced visualization sampling is enabled.
 
 ### `build_wandb_log`
 

@@ -120,12 +120,20 @@ enabled
 root_dir
 every_n_epochs
 num_samples
+category_balanced
+samples_per_category
 split
 log_to_wandb
 mesh_resolution
 exist_threshold
 max_points
 ```
+
+During training, `category_balanced: true` selects visualization samples from
+`dataset.models` metadata instead of taking the first validation batch. With
+`samples_per_category: 1`, one sample is visualized for every available
+category in the configured validation split. `num_samples` remains the fallback
+count when category metadata is unavailable or category balancing is disabled.
 
 When enabled, the trainer writes files once per selected epoch under:
 

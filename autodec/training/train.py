@@ -106,6 +106,12 @@ def main(cfg: DictConfig):
         visualize_split=cfg_get(visualization_cfg, "split", "val"),
         log_visualizations_to_wandb=cfg_get(visualization_cfg, "log_to_wandb", True),
         metric_logger=metric_logger,
+        visualize_category_balanced=cfg_get(visualization_cfg, "category_balanced", True),
+        visualize_samples_per_category=cfg_get(
+            visualization_cfg,
+            "samples_per_category",
+            cfg_get(visualization_cfg, "num_samples_per_cat", 1),
+        ),
     )
     trainer.train()
 
