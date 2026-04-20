@@ -30,6 +30,24 @@ def test_eval_script_calls_autodec_eval_entrypoint():
     assert '"$@"' in content
 
 
+def test_multigpu_pipeline_runs_phase_training_and_eval():
+    script = Path("autodec/scripts/run_multigpu_pipeline.sh")
+    content = script.read_text()
+
+    assert content.startswith("#!/usr/bin/env bash")
+    assert "ensure_fast_sampler" in content
+    assert "torchrun --nproc_per_node=\"${NUM_GPUS}\" -m autodec.training.train" in content
+    assert "--config-name train_phase1" in content
+    assert "--config-name train_phase2" in content
+    assert "trainer.num_epochs=\"${PHASE1_EPOCHS}\"" in content
+    assert "trainer.num_epochs=\"${PHASE2_EPOCHS}\"" in content
+    assert "trainer.batch_size=\"${BATCH_SIZE_PER_GPU}\"" in content
+    assert "checkpoints.resume_from=\"${PHASE1_CKPT}\"" in content
+    assert "python -m autodec.eval.run" in content
+    assert "checkpoints.resume_from=\"${PHASE2_CKPT}\"" in content
+    assert '"$@"' in content
+
+
 def test_scripts_folder_has_same_name_documentation():
     doc = Path("autodec/scripts/scripts.md")
 
@@ -38,6 +56,7 @@ def test_scripts_folder_has_same_name_documentation():
     assert "run_phase1.sh" in content
     assert "run_phase2.sh" in content
     assert "run_eval_test.sh" in content
+    assert "run_multigpu_pipeline.sh" in content
     assert "train_phase1" in content
     assert "train_phase2" in content
     assert "eval_test" in content

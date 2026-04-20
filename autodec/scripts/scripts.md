@@ -12,6 +12,7 @@ run_phase1.sh
 run_phase2.sh
 run_all.sh
 run_eval_test.sh
+run_multigpu_pipeline.sh
 scripts.md
 ```
 
@@ -192,4 +193,62 @@ bash autodec/scripts/run_eval_test.sh \
   shapenet.categories=null \
   use_wandb=true \
   wandb.project=autodec
+```
+
+## `run_multigpu_pipeline.sh`
+
+Runs the standard AutoDec pipeline with distributed training:
+
+```bash
+torchrun --nproc_per_node="${NUM_GPUS}" -m autodec.training.train --config-name train_phase1 ...
+torchrun --nproc_per_node="${NUM_GPUS}" -m autodec.training.train --config-name train_phase2 ...
+python -m autodec.eval.run --config-name eval_test ...
+```
+
+Defaults:
+
+```text
+PHASE1_EPOCHS=100
+PHASE2_EPOCHS=200
+BATCH_SIZE_PER_GPU=8
+NUM_GPUS=<torch.cuda.device_count()>
+CHECKPOINT_ROOT=checkpoints
+PHASE1_RUN_NAME=autodec_phase1_ddp${NUM_GPUS}_100ep_bs8
+PHASE2_RUN_NAME=autodec_phase2_ddp${NUM_GPUS}_200ep_bs8
+EVAL_RUN_NAME=autodec_test_eval_ddp${NUM_GPUS}_phase2_200ep_bs8
+```
+
+Phase 2 automatically resumes:
+
+```text
+${CHECKPOINT_ROOT}/${PHASE1_RUN_NAME}/epoch_${PHASE1_EPOCHS}.pt
+```
+
+Evaluation automatically loads:
+
+```text
+${CHECKPOINT_ROOT}/${PHASE2_RUN_NAME}/epoch_${PHASE2_EPOCHS}.pt
+```
+
+Training uses `torchrun` for DDP. Evaluation runs once in a single process
+because the current evaluator is not distributed; launching it with `torchrun`
+would duplicate the same test pass and write the same output files from
+multiple processes.
+
+Example:
+
+```bash
+bash autodec/scripts/run_multigpu_pipeline.sh
+```
+
+Useful environment overrides:
+
+```bash
+NUM_GPUS=4 BATCH_SIZE_PER_GPU=8 bash autodec/scripts/run_multigpu_pipeline.sh
+```
+
+Extra Hydra overrides are forwarded to phase 1, phase 2, and evaluation:
+
+```bash
+NUM_GPUS=4 bash autodec/scripts/run_multigpu_pipeline.sh use_wandb=true wandb.project=autodec
 ```
