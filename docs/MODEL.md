@@ -1289,7 +1289,7 @@ primitive-scale bound after the offset decoder predicts raw offsets:
 Delta_i = tanh(Delta_i_raw) * offset_cap * mean(scale_{part(i)})
 ```
 
-`offset_cap: 0.3` is enabled in the default AutoDec configs. Set
+`offset_cap: 0.4` is enabled in the default AutoDec configs. Set
 `offset_cap: null` to keep the older unbounded behavior. The cap is per
 coordinate and scale-aware: points sampled from larger primitives can move
 farther than points sampled from thin primitives.

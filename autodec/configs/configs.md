@@ -224,7 +224,7 @@ Use `self_attention_mode: none`, `positional_frequencies: 0`, and
 
 `offset_cap` enables the primitive-scale offset bound
 `tanh(raw_offset) * offset_cap * mean(scale_j)` for points sampled from
-primitive `j`. The default YAML value is `0.3`. Set it to `null` to keep the
+primitive `j`. The default YAML value is `0.4`. Set it to `null` to keep the
 older unbounded offset behavior. `offset_scale` is the legacy scalar bound and
 should only be used when `offset_cap` is `null`.
 

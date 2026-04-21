@@ -485,7 +485,7 @@ This optional scalar bound is disabled by default. The higher-level
 offsets = tanh(raw_offsets) * offset_cap * mean(scale_{part(i)})
 ```
 
-with default `offset_cap: 0.3` in the AutoDec YAML configs. Set
+with default `offset_cap: 0.4` in the AutoDec YAML configs. Set
 `offset_cap: null` to keep the unbounded path.
 
 ### `build_offset_decoder`

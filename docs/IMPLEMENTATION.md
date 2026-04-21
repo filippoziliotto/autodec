@@ -29,7 +29,7 @@ first implementation plan:
 - `lambda_cons` now uses a true no-residual decoder pass,
   `decoder(E_dec, Z=0)`, and remains disabled by default in YAML configs.
 - Primitive-scale offset caps are implemented in `AutoDecDecoder`. The default
-  YAML configs use `offset_cap: 0.3`; set `offset_cap: null` to restore the
+  YAML configs use `offset_cap: 0.4`; set `offset_cap: null` to restore the
   older unbounded offset behavior. Legacy scalar `offset_scale` still exists
   for compatibility when `offset_cap` is disabled.
 - Training-time Z-dropout/residual dropout is not implemented. It remains a
@@ -490,7 +490,7 @@ Responsibilities:
   offsets = tanh(raw_offsets) * offset_cap * mean(scale_{part(i)})
   ```
 
-  where the default YAML value is `offset_cap: 0.3`.
+  where the default YAML value is `offset_cap: 0.4`.
 
 Output convention:
 
@@ -982,7 +982,7 @@ autodec:
     n_blocks: 2
     self_attention_mode: within_primitive
     offset_scale: null
-    offset_cap: 0.3
+    offset_cap: 0.4
 
 dataset: shapenet
 shapenet:

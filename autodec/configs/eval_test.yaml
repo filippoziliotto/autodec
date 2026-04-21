@@ -68,7 +68,7 @@ autodec:
     n_blocks: 2
     self_attention_mode: within_primitive
     offset_scale: null
-    offset_cap: 0.3
+    offset_cap: 0.4
 
 shapenet:
   path: data/ShapeNet

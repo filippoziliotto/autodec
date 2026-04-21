@@ -303,7 +303,7 @@ Where ⊙ denotes element-wise multiplication of each offset by its primitive's 
 Δ = tanh(Δ_raw) · offset_cap · mean(scale_j)
 ```
 
-repeated to each surface point from primitive j. The default AutoDec configs use `offset_cap: 0.3`; setting `offset_cap: null` restores the older unbounded behavior. This is preferred over the legacy scalar `offset_scale` because it prevents residual collapse while preserving scale-aware flexibility.
+repeated to each surface point from primitive j. The default AutoDec configs use `offset_cap: 0.4`; setting `offset_cap: null` restores the older unbounded behavior. This is preferred over the legacy scalar `offset_scale` because it prevents residual collapse while preserving scale-aware flexibility.
 
 **Cardinality conventions:**
 - **Training:** Always produce a fixed-size tensor X̂ ∈ ℝ^{(P·S_dec)×3} = ℝ^{4096×3}. Soft existence weights modulate the loss, not the tensor size. This avoids variable-length complications during batched training.
