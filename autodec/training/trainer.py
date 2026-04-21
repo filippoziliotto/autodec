@@ -9,6 +9,7 @@ from torch.utils.data._utils.collate import default_collate
 from tqdm import tqdm
 
 from autodec.utils.checkpoints import save_autodec_checkpoint
+from autodec.utils.inference import prune_decoded_points
 from autodec.visualizations import build_wandb_log
 
 
@@ -185,6 +186,7 @@ class AutoDecTrainer:
             batch, selected_samples = self._visualization_batch(loader)
             batch = move_batch_to_device(batch, self.device)
             outdict = self.model(batch["points"].float())
+            outdict = self._visualization_outdict(outdict, batch)
             num_samples = (
                 len(selected_samples)
                 if selected_samples
@@ -249,6 +251,19 @@ class AutoDecTrainer:
                 items = [dataset[item["dataset_index"]] for item in selected]
                 return default_collate(items), selected
         return next(iter(loader)), []
+
+    def _visualization_outdict(self, outdict, batch):
+        if "decoded_points" not in outdict or "part_ids" not in outdict:
+            return outdict
+        if "exist" not in outdict and "exist_logit" not in outdict:
+            return outdict
+        result = dict(outdict)
+        result["decoded_points"] = prune_decoded_points(
+            outdict,
+            exist_threshold=getattr(self.visualizer, "exist_threshold", 0.5),
+            target_count=int(batch["points"].shape[1]),
+        )
+        return result
 
     def _annotate_visualization_metadata(self, records, selected_samples):
         if not selected_samples:

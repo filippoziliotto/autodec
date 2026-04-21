@@ -52,6 +52,23 @@ class ConsistencyTinyModel(nn.Module):
         return outdict
 
 
+class PrunableVisualizationModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.bias = nn.Parameter(torch.tensor(0.0))
+
+    def forward(self, points):
+        batch_size = points.shape[0]
+        active = torch.zeros(batch_size, 2, 3, device=points.device) + self.bias
+        inactive = torch.ones(batch_size, 2, 3, device=points.device) * 100.0
+        return {
+            "decoded_points": torch.cat([active, inactive], dim=1),
+            "decoded_weights": torch.ones(batch_size, 4, device=points.device),
+            "part_ids": torch.tensor([0, 0, 1, 1], device=points.device),
+            "exist": torch.tensor([[[0.9], [0.1]]], device=points.device).repeat(batch_size, 1, 1),
+        }
+
+
 class RecordingVisualizer:
     def __init__(self):
         self.calls = []
@@ -248,6 +265,42 @@ def test_autodec_trainer_logs_visualizations_after_eval_epoch(tmp_path):
     assert visualizer.calls[0]["split"] == "val"
     assert visualizer.calls[0]["num_samples"] == 2
     assert wandb_run.logs[-1] == ({"visual/gt": ["record"]}, 4)
+
+
+def test_autodec_trainer_prunes_reconstruction_points_for_visualization(tmp_path):
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.zeros(1, 4, 3)}],
+        "val": [{"points": torch.zeros(1, 4, 3)}],
+    }
+    model = PrunableVisualizationModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    visualizer = RecordingVisualizer()
+
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=TinyLoss(),
+        ctx=SimpleNamespace(
+            num_epochs=1,
+            save_path=str(tmp_path),
+            visualize_every_n_epochs=1,
+            visualize_num_samples=1,
+            visualize_split="val",
+            log_visualizations_to_wandb=False,
+        ),
+        device=torch.device("cpu"),
+        visualizer=visualizer,
+    )
+
+    trainer.evaluate(0)
+
+    decoded_points = visualizer.calls[0]["outdict"]["decoded_points"]
+    assert decoded_points.shape == (1, 4, 3)
+    assert decoded_points.max().item() == 0.0
 
 
 def test_autodec_trainer_logs_one_visualization_per_category_by_default(tmp_path):
