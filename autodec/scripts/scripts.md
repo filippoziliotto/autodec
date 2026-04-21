@@ -190,9 +190,16 @@ Useful all-category WandB example:
 ```bash
 bash autodec/scripts/run_eval_test.sh \
   checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt \
-  shapenet.categories=null \
   use_wandb=true \
   wandb.project=autodec
+```
+
+For the SuperDec out-of-category held-out classes, use:
+
+```bash
+python -m autodec.eval.run \
+  --config-name eval_test_out_category \
+  checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt
 ```
 
 ## `run_multigpu_pipeline.sh`

@@ -72,6 +72,7 @@ autodec:
 
 shapenet:
   path: data/ShapeNet
+  category_split: all
   categories: null
   normalize: false
   batch_size: 8

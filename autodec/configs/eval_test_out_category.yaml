@@ -1,0 +1,7 @@
+defaults:
+  - eval_test
+  - _self_
+
+shapenet:
+  category_split: paper_unseen
+  categories: null

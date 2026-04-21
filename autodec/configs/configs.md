@@ -11,6 +11,12 @@ smoke.yaml
 train_phase1.yaml
 train_phase2.yaml
 eval_test.yaml
+train_phase1_in_category.yaml
+train_phase2_in_category.yaml
+eval_test_in_category.yaml
+train_phase1_out_category.yaml
+train_phase2_out_category.yaml
+eval_test_out_category.yaml
 ```
 
 The AutoDec training entrypoint is:
@@ -48,8 +54,8 @@ loss
 ```
 
 `eval_test.yaml` replaces training-only optimizer/scheduler fields with an
-`eval` section and uses `shapenet.categories: null` by default so the
-category-balanced visualization selector can cover at least five categories.
+`eval` section and uses `shapenet.category_split: all` by default so the
+category-balanced visualization selector can cover the ShapeNet categories.
 
 ### `checkpoints`
 
@@ -230,15 +236,26 @@ should only be used when `offset_cap` is `null`.
 
 ### `shapenet`
 
-AutoDec ShapeNet runs are configured to train and validate on chairs by
-default:
+AutoDec ShapeNet runs are configured to train and validate on all 13 ShapeNet
+classes by default:
 
 ```text
-categories: ["03001627"]
+category_split: all
+categories: null
 ```
 
-`03001627` is the ShapeNet synset id for chair. The category filtering is
-handled by the existing SuperDec `ShapeNet` dataset.
+`category_split` is resolved by AutoDec before constructing the existing
+SuperDec `ShapeNet` dataset:
+
+```text
+all          all 13 classes for the in-category experiment
+paper_seen   airplane, bench, chair, lamp, rifle, table
+paper_unseen car, sofa, loudspeaker, cabinet, display, telephone, watercraft
+null         preserve the explicit shapenet.categories list
+```
+
+Use `category_split: null` with an explicit `categories` list for debugging
+single classes, for example `categories: ["03001627"]` for chairs.
 
 AutoDec also supports optional deterministic split-size limits:
 
@@ -423,7 +440,7 @@ Key choices:
 ```text
 encoder_from: checkpoints/shapenet/ckpt.pt
 phase: 1
-categories: ["03001627"]
+category_split: all
 lambda_sq: 0
 lambda_par: 0
 lambda_exist: 0
@@ -457,7 +474,7 @@ Key choices:
 ```text
 resume_from: checkpoints/autodec_phase1/epoch_200.pt
 phase: 2
-categories: ["03001627"]
+category_split: all
 lambda_sq: 1.0
 lambda_par: 0.06
 lambda_exist: 0.01

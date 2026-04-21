@@ -1,0 +1,7 @@
+defaults:
+  - eval_test
+  - _self_
+
+shapenet:
+  category_split: all
+  categories: null

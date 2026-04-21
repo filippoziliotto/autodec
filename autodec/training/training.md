@@ -210,8 +210,18 @@ Returns:
 If distributed training is enabled, it uses `DistributedSampler` for the train
 dataset and disables DataLoader shuffle.
 
-For ShapeNet, the dataloader also applies AutoDec-local split-size limits after
-constructing the SuperDec dataset:
+For ShapeNet, AutoDec first resolves `cfg.shapenet.category_split` into the
+explicit category ids consumed by the SuperDec dataset:
+
+```text
+all          all 13 ShapeNet classes
+paper_seen   airplane, bench, chair, lamp, rifle, table
+paper_unseen car, sofa, loudspeaker, cabinet, display, telephone, watercraft
+null         keep cfg.shapenet.categories unchanged
+```
+
+It then applies AutoDec-local split-size limits after constructing the SuperDec
+dataset:
 
 ```text
 cfg.shapenet.max_train_items

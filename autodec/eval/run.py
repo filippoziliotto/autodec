@@ -29,8 +29,10 @@ except ModuleNotFoundError:
 def _build_dataset(cfg):
     if cfg_get(cfg, "dataset", "shapenet") != "shapenet":
         raise ValueError("AutoDec test evaluation currently supports dataset=shapenet")
+    from autodec.utils.shapenet_categories import apply_shapenet_category_split
     from superdec.data.dataloader import ShapeNet
 
+    apply_shapenet_category_split(cfg)
     eval_cfg = cfg_get(cfg, "eval")
     return ShapeNet(split=cfg_get(eval_cfg, "split", "test"), cfg=cfg)
 

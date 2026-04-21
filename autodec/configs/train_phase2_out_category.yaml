@@ -1,0 +1,7 @@
+defaults:
+  - train_phase2
+  - _self_
+
+shapenet:
+  category_split: paper_seen
+  categories: null

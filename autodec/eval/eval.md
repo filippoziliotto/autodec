@@ -6,6 +6,11 @@ Standalone evaluation code for trained AutoDec checkpoints.
 It builds the real AutoDec model, loads a checkpoint, constructs the ShapeNet
 `test` split, and launches `AutoDecEvaluator`.
 
+For ShapeNet, `run.py` resolves `shapenet.category_split` before constructing
+the dataset. Use `all` for the in-category test set, `paper_unseen` for the
+SuperDec out-of-category held-out classes, and `null` to preserve an explicit
+`shapenet.categories` list.
+
 `evaluator.py` contains the core evaluation loop. It runs the model in
 `torch.no_grad()`, aggregates AutoDec loss metrics, aggregates paper-style point
 cloud metrics, writes `metrics.json`, writes `per_sample_metrics.jsonl`, and

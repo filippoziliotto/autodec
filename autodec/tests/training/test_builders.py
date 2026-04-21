@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import sys
 
 import torch
 import torch.nn as nn
@@ -211,3 +212,41 @@ def test_limit_dataset_leaves_dataset_unchanged_when_limit_is_null_or_large():
 
     assert limit_dataset(dataset, max_items=None, seed=7) is dataset
     assert limit_dataset(dataset, max_items=10, seed=7) is dataset
+
+
+def test_build_dataloaders_applies_shapenet_category_split(monkeypatch):
+    from autodec.utils.shapenet_categories import PAPER_SEEN_CATEGORIES
+    from autodec.training.builders import build_dataloaders
+
+    calls = []
+
+    class FakeShapeNet:
+        def __init__(self, split, cfg):
+            calls.append((split, list(cfg.shapenet.categories)))
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, idx):
+            return {"points": torch.zeros(4, 3)}
+
+    fake_module = SimpleNamespace(ABO=object, ASE_Object=object, ShapeNet=FakeShapeNet)
+    monkeypatch.setitem(sys.modules, "superdec.data.dataloader", fake_module)
+    cfg = SimpleNamespace(
+        dataset="shapenet",
+        shapenet=SimpleNamespace(
+            category_split="paper_seen",
+            categories=None,
+            max_train_items=None,
+            max_val_items=None,
+            subset_seed=0,
+        ),
+        trainer=SimpleNamespace(batch_size=1, num_workers=0),
+    )
+
+    build_dataloaders(cfg)
+
+    assert calls == [
+        ("train", PAPER_SEEN_CATEGORIES),
+        ("val", PAPER_SEEN_CATEGORIES),
+    ]

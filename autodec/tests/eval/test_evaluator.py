@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -181,6 +182,32 @@ def _cfg(tmp_path):
             log_to_wandb=False,
         ),
     )
+
+
+def test_eval_dataset_builder_applies_shapenet_category_split(monkeypatch):
+    from autodec.utils.shapenet_categories import PAPER_UNSEEN_CATEGORIES
+    from autodec.eval.run import _build_dataset
+
+    calls = []
+
+    class FakeShapeNet:
+        def __init__(self, split, cfg):
+            calls.append((split, list(cfg.shapenet.categories)))
+
+    fake_module = SimpleNamespace(ShapeNet=FakeShapeNet)
+    monkeypatch.setitem(sys.modules, "superdec.data.dataloader", fake_module)
+    cfg = SimpleNamespace(
+        dataset="shapenet",
+        shapenet=SimpleNamespace(
+            category_split="paper_unseen",
+            categories=None,
+        ),
+        eval=SimpleNamespace(split="test"),
+    )
+
+    _build_dataset(cfg)
+
+    assert calls == [("test", PAPER_UNSEEN_CATEGORIES)]
 
 
 def test_evaluator_writes_metrics_and_twenty_category_visualizations(tmp_path):

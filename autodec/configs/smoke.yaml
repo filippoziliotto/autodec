@@ -86,6 +86,7 @@ autodec:
 
 shapenet:
   path: data/ShapeNet
+  category_split: null
   categories: ["03001627"]
   normalize: false
   max_train_items: 8

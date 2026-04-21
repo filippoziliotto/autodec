@@ -183,10 +183,12 @@ def _limit_shapenet_splits(cfg, train_ds, val_ds):
 
 
 def build_dataloaders(cfg, is_distributed=False):
+    from autodec.utils.shapenet_categories import apply_shapenet_category_split
     from superdec.data.dataloader import ABO, ASE_Object, ShapeNet
 
     dataset = cfg_get(cfg, "dataset")
     if dataset == "shapenet":
+        apply_shapenet_category_split(cfg)
         train_ds = ShapeNet(split="train", cfg=cfg)
         val_ds = ShapeNet(split="val", cfg=cfg)
         train_ds, val_ds = _limit_shapenet_splits(cfg, train_ds, val_ds)
