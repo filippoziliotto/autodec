@@ -2,7 +2,7 @@
 
 This folder contains the AutoDec visualization utilities. The AutoDec trainer
 can call them at the end of an evaluation epoch, then optionally upload the
-same local files to WandB as 3D objects.
+standard GT, SQ, and reconstruction files to WandB as 3D objects.
 
 The default local output root is:
 
@@ -138,9 +138,12 @@ Returned keys:
 ```text
 visual/gt
 visual/sq_mesh
-visual/sq_mesh_lm  # only when records include LM meshes
 visual/reconstruction
 ```
+
+Optional `sq_mesh_lm.obj` files are saved locally only. They are intentionally
+not included in the WandB payload, so WandB comparisons stay focused on the
+normal SQ forward pass.
 
 Each value is a list of `wandb.Object3D` objects. The function imports WandB
 lazily, so the rest of the visualization package can be used without an active

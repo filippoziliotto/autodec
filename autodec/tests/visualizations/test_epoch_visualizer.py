@@ -146,6 +146,43 @@ def test_build_wandb_log_returns_expected_visual_keys(tmp_path):
     assert seen == ["input_gt.ply", "sq_mesh.obj", "reconstruction.ply"]
 
 
+def test_build_wandb_log_omits_saved_lm_sq_mesh(tmp_path):
+    from autodec.visualizations import AutoDecEpochVisualizer, build_wandb_log
+
+    visualizer = AutoDecEpochVisualizer(
+        root_dir=tmp_path,
+        run_name="debug_run",
+        mesh_resolution=6,
+        max_points=None,
+    )
+    lm_outdict = _outdict()
+    lm_outdict["trans"] = torch.tensor([[[1.0, 0.0, 0.0]]])
+    records = visualizer.write_epoch(
+        batch=_batch(),
+        outdict=_outdict(),
+        lm_outdict=lm_outdict,
+        epoch=0,
+        split="test",
+        num_samples=1,
+    )
+
+    seen = []
+
+    def fake_object3d(path):
+        seen.append(path.name)
+        return f"object:{path.name}"
+
+    payload = build_wandb_log(records, object3d_factory=fake_object3d)
+
+    assert records[0].sq_mesh_lm_path.exists()
+    assert payload == {
+        "visual/gt": ["object:input_gt.ply"],
+        "visual/sq_mesh": ["object:sq_mesh.obj"],
+        "visual/reconstruction": ["object:reconstruction.ply"],
+    }
+    assert seen == ["input_gt.ply", "sq_mesh.obj", "reconstruction.ply"]
+
+
 def test_default_wandb_log_converts_point_cloud_ply_to_arrays(tmp_path, monkeypatch):
     from autodec.visualizations import AutoDecEpochVisualizer, build_wandb_log
 

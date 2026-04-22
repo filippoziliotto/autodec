@@ -47,6 +47,11 @@ visual/reconstruction
 
 and that the object factory receives the local visualization file paths.
 
+### `test_build_wandb_log_omits_saved_lm_sq_mesh`
+
+Checks that optional `sq_mesh_lm.obj` files are still saved locally but are not
+included in the WandB payload.
+
 ### `test_sq_mesh_vertices_clamp_out_of_range_shape_exponents`
 
 Passes out-of-range shape exponents directly to the SQ mesh helper and verifies

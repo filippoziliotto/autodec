@@ -186,21 +186,13 @@ def build_wandb_log(records, object3d_factory=None, prefix="visual"):
     """Build a WandB payload from local visualization records without logging it."""
 
     object3d_factory = object3d_factory or _default_object3d_factory
-    payload = {
+    return {
         f"{prefix}/gt": [object3d_factory(record.input_path) for record in records],
         f"{prefix}/sq_mesh": [object3d_factory(record.sq_mesh_path) for record in records],
         f"{prefix}/reconstruction": [
             object3d_factory(record.reconstruction_path) for record in records
         ],
     }
-    lm_paths = [
-        record.sq_mesh_lm_path
-        for record in records
-        if record.sq_mesh_lm_path is not None
-    ]
-    if lm_paths:
-        payload[f"{prefix}/sq_mesh_lm"] = [object3d_factory(path) for path in lm_paths]
-    return payload
 
 
 def log_wandb_visualizations(wandb_run, records, step=None, prefix="visual"):

@@ -36,8 +36,9 @@ For qualitative test-set outputs, `visualization.write_lm_optimized_sq_mesh`
 can write an additional `sq_mesh_lm.obj` per selected sample. This path keeps
 the normal evaluation behavior intact: `sq_mesh.obj`, reconstruction points,
 and metrics are produced from the unrefined model output, while only the extra
-mesh is generated from a cloned LM-refined SQ outdict. The option is ignored
-outside `split: test`.
+mesh is generated from a cloned LM-refined SQ outdict. The LM mesh is saved on
+disk but not logged to WandB; WandB logs only the normal SQ visualization. The
+option is ignored outside `split: test`.
 
 The two LM modes are mutually exclusive. Use
 `eval.use_lm_optimization: false` with
