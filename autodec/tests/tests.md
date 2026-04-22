@@ -91,6 +91,12 @@ It also verifies `phase1_parameters()` returns exactly residual-projector and
 decoder parameters, and `unfreeze_encoder()` restores all parameters to
 trainable.
 
+#### `test_autodec_wrapper_passes_decoder_detach_sq_for_recon_config`
+
+Builds `AutoDec` with an injected encoder and a real decoder created from
+`ctx.decoder`. Verifies `detach_sq_for_recon` is passed through to
+`AutoDecDecoder` instead of silently falling back to the decoder default.
+
 ### `test_encoder.py`
 
 Tests `autodec.encoder.AutoDecEncoder`.
@@ -321,6 +327,17 @@ offset decoder with a small residual-echo module and calls
 `return_consistency=True`. It verifies the normal pass sees nonzero residuals
 while the consistency pass uses `Z=0` and therefore returns the unoffset surface
 points.
+
+`test_autodec_decoder_can_detach_sq_geometry_from_reconstruction_gradients`
+constructs decoder inputs with trainable SQ tensors and enables
+`detach_sq_for_recon`. A reconstruction-style loss still backpropagates into the
+residual path, but does not produce gradients for `scale`, `shape`, `trans`,
+`rotate`, `exist_logit`, or `exist`.
+
+`test_autodec_decoder_keeps_sq_geometry_gradients_by_default` verifies the
+default behavior remains unchanged: when the toggle is disabled, reconstruction
+gradients can still flow through sampled SQ surface geometry and existence
+gates.
 
 ## Subfolders
 

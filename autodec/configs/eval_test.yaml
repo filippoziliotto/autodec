@@ -69,6 +69,7 @@ autodec:
     self_attention_mode: within_primitive
     offset_scale: null
     offset_cap: 0.4
+    detach_sq_for_recon: false
 
 shapenet:
   path: data/ShapeNet

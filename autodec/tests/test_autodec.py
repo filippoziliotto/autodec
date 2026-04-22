@@ -91,3 +91,29 @@ def test_autodec_phase1_freezes_superdec_backbone_but_not_residual_or_decoder():
     model.unfreeze_encoder()
 
     assert all(p.requires_grad for p in model.parameters())
+
+
+def test_autodec_wrapper_passes_decoder_detach_sq_for_recon_config():
+    from autodec.autodec import AutoDec
+
+    ctx = SimpleNamespace(
+        residual_dim=4,
+        primitive_dim=18,
+        n_surface_samples=2,
+        exist_tau=1.0,
+        decoder=SimpleNamespace(
+            hidden_dim=16,
+            n_heads=4,
+            positional_frequencies=0,
+            component_feature_dim=0,
+            n_blocks=1,
+            self_attention_mode="none",
+            offset_scale=None,
+            offset_cap=None,
+            detach_sq_for_recon=True,
+        ),
+    )
+
+    model = AutoDec(ctx=ctx, encoder=ToyEncoder())
+
+    assert model.decoder.detach_sq_for_recon is True

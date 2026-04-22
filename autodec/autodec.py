@@ -52,6 +52,11 @@ class AutoDec(nn.Module):
                 component_feature_dim=_cfg_get(decoder_ctx, "component_feature_dim", None),
                 n_blocks=_cfg_get(decoder_ctx, "n_blocks", 2),
                 self_attention_mode=_cfg_get(decoder_ctx, "self_attention_mode", "within_primitive"),
+                detach_sq_for_recon=_cfg_get(
+                    decoder_ctx,
+                    "detach_sq_for_recon",
+                    _cfg_get(ctx, "detach_sq_for_recon", False),
+                ),
             )
         self.encoder = encoder
         self.decoder = decoder

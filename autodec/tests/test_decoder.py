@@ -216,3 +216,66 @@ def test_autodec_decoder_offset_cap_does_not_backprop_into_scale():
 
     assert offsets.grad is not None
     assert scale.grad is None
+
+
+def _gradient_outdict(batch=1, primitives=2, residual_dim=4):
+    outdict = _encoder_outdict(batch=batch, primitives=primitives, residual_dim=residual_dim)
+    for key in ("scale", "shape", "trans", "rotate", "exist_logit", "exist", "residual"):
+        outdict[key] = outdict[key].clone().detach().requires_grad_(True)
+    return outdict
+
+
+def test_autodec_decoder_can_detach_sq_geometry_from_reconstruction_gradients():
+    from autodec.decoder import AutoDecDecoder
+
+    residual_dim = 4
+    decoder = AutoDecDecoder(
+        residual_dim=residual_dim,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        angle_sampler=FixedAngleSampler(),
+        detach_sq_for_recon=True,
+    )
+    decoder.offset_decoder = ResidualEchoOffsetDecoder(residual_dim)
+    outdict = _gradient_outdict(residual_dim=residual_dim)
+
+    out = decoder(outdict)
+    out["decoded_points"].sum().backward()
+
+    assert outdict["residual"].grad is not None
+    assert outdict["residual"].grad.abs().sum() > 0
+    for key in ("scale", "shape", "trans", "rotate", "exist_logit", "exist"):
+        assert outdict[key].grad is None
+
+
+def test_autodec_decoder_keeps_sq_geometry_gradients_by_default():
+    from autodec.decoder import AutoDecDecoder
+
+    residual_dim = 4
+    decoder = AutoDecDecoder(
+        residual_dim=residual_dim,
+        n_surface_samples=2,
+        hidden_dim=16,
+        n_heads=4,
+        positional_frequencies=0,
+        component_feature_dim=0,
+        n_blocks=1,
+        self_attention_mode="none",
+        angle_sampler=FixedAngleSampler(),
+    )
+    decoder.offset_decoder = ResidualEchoOffsetDecoder(residual_dim)
+    outdict = _gradient_outdict(residual_dim=residual_dim)
+
+    out = decoder(outdict)
+    out["decoded_points"].sum().backward()
+
+    assert outdict["residual"].grad is not None
+    assert outdict["scale"].grad is not None
+    assert outdict["trans"].grad is not None
+    assert outdict["rotate"].grad is not None
+    assert outdict["exist_logit"].grad is not None

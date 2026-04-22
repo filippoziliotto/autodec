@@ -8,6 +8,18 @@ from autodec.sampling.sq_surface import SQSurfaceSampler
 from autodec.utils.packing import pack_decoder_primitive_features, repeat_by_part_ids
 
 
+_SQ_RECON_KEYS = (
+    "scale",
+    "shape",
+    "rotate",
+    "trans",
+    "exist_logit",
+    "exist",
+    "rotation_quat",
+    "rotation_6d",
+)
+
+
 class AutoDecDecoder(nn.Module):
     """Decode AutoDec encoder outputs into a dense point cloud."""
 
@@ -26,6 +38,7 @@ class AutoDecDecoder(nn.Module):
         component_feature_dim=None,
         n_blocks=2,
         self_attention_mode="within_primitive",
+        detach_sq_for_recon=False,
     ):
         super().__init__()
         if offset_cap is not None and offset_scale is not None:
@@ -45,6 +58,7 @@ class AutoDecDecoder(nn.Module):
         self.component_feature_dim = int(component_feature_dim)
         if self.component_feature_dim < 0:
             raise ValueError("component_feature_dim must be non-negative")
+        self.detach_sq_for_recon = bool(detach_sq_for_recon)
         self.use_component_projection = self.component_feature_dim > 0
         if self.use_component_projection:
             self.point_feature_dim = self.component_feature_dim * 4
@@ -177,9 +191,20 @@ class AutoDecDecoder(nn.Module):
         offset_limit = self.offset_cap * mean_scale_per_point
         return offsets.tanh() * offset_limit, offset_limit
 
+    def _reconstruction_outdict(self, outdict):
+        if not self.detach_sq_for_recon:
+            return outdict
+        result = dict(outdict)
+        for key in _SQ_RECON_KEYS:
+            value = result.get(key)
+            if torch.is_tensor(value):
+                result[key] = value.detach()
+        return result
+
     def forward(self, outdict, return_attention=False, return_consistency=False):
-        sample = self.surface_sampler(outdict)
-        primitive_features = pack_decoder_primitive_features(outdict)
+        recon_outdict = self._reconstruction_outdict(outdict)
+        sample = self.surface_sampler(recon_outdict)
+        primitive_features = pack_decoder_primitive_features(recon_outdict)
         residual = outdict["residual"]
         position_features = self.surface_position_features(sample.flat_points)
 
@@ -194,7 +219,7 @@ class AutoDecDecoder(nn.Module):
         )
         offsets, offset_limit = self._apply_offset_cap(
             offsets,
-            outdict["scale"],
+            recon_outdict["scale"],
             sample.part_ids,
         )
 
@@ -231,7 +256,7 @@ class AutoDecDecoder(nn.Module):
             )
             consistency_offsets, _ = self._apply_offset_cap(
                 consistency_offsets,
-                outdict["scale"],
+                recon_outdict["scale"],
                 sample.part_ids,
             )
             result["consistency_decoded_offsets"] = consistency_offsets

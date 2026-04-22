@@ -278,6 +278,7 @@ n_blocks           = 2
 self_attention_mode = within_primitive
 offset_scale       = None
 offset_cap         = None
+detach_sq_for_recon = False
 ```
 
 Input keys:
@@ -346,6 +347,12 @@ concatenation:
    ```text
    decoded_points = surface_points + decoded_weights.unsqueeze(-1) * decoded_offsets
    ```
+
+When `detach_sq_for_recon=True`, steps 1, 2, positional features, gates, and
+the offset-cap scale reference are computed from detached SQ tensors. The
+returned outdict still keeps the original trainable SQ fields, so `AutoDecLoss`
+can train them through `lambda_sq`, parsimony, and existence losses while
+blocking direct reconstruction gradients into SQ geometry.
 
 Important correctness detail:
 

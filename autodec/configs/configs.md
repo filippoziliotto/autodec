@@ -231,6 +231,7 @@ n_blocks
 self_attention_mode
 offset_scale
 offset_cap
+detach_sq_for_recon
 ```
 
 `positional_frequencies` controls Fourier features for sampled SQ surface
@@ -254,6 +255,14 @@ Use `self_attention_mode: none`, `positional_frequencies: 0`, and
 primitive `j`. The default YAML value is `0.4`. Set it to `null` to keep the
 older unbounded offset behavior. `offset_scale` is the legacy scalar bound and
 should only be used when `offset_cap` is `null`.
+
+`detach_sq_for_recon` detaches the decoder-side SQ geometry from the
+reconstruction loss. When true, sampled SQ surface points, positional features,
+primitive parameter tokens, existence gates, and offset-cap scale references are
+built from detached SQ tensors. The original trainable SQ tensors remain in the
+model output for `lambda_sq`, parsimony, existence losses, metrics, and
+serialization. The code default is `false`; `train_phase2.yaml` enables it for
+the SQ-preserving phase-2 ablation.
 
 ### `shapenet`
 
@@ -521,6 +530,7 @@ lambda_sq: 1.0
 lambda_par: 0.06
 lambda_exist: 0.01
 lambda_cons: 0.0
+autodec.decoder.detach_sq_for_recon: true
 ```
 
 Expected trainable parameters:
@@ -538,4 +548,7 @@ encoder_lr < residual_lr ~= decoder_lr
 ```
 
 This phase allows the primitive decomposition and decoder to co-adapt while
-regularizing the explicit SQ branch.
+regularizing the explicit SQ branch. With
+`autodec.decoder.detach_sq_for_recon: true`, the reconstruction loss no longer
+backpropagates through the sampled SQ geometry or packed SQ parameter features;
+the explicit SQ branch is instead trained by the SQ/parsimony/existence losses.
