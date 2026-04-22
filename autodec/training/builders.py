@@ -1,5 +1,6 @@
 import os
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -32,6 +33,22 @@ def _phase_number(phase):
             return 2
         return int(text)
     return int(phase)
+
+
+def validate_phase2_start_checkpoint(cfg):
+    opt_cfg = cfg_get(cfg, "optimizer")
+    checkpoint_cfg = cfg_get(cfg, "checkpoints")
+    phase = _phase_number(cfg_get(opt_cfg, "phase", 1))
+    if phase != 2 or cfg_get(checkpoint_cfg, "keep_epoch", False):
+        return
+
+    resume_from = cfg_get(checkpoint_cfg, "resume_from")
+    if resume_from is None or Path(str(resume_from)).name != "best.pt":
+        raise ValueError(
+            "Starting phase 2 requires checkpoints.resume_from to point to the "
+            "phase-1 best.pt checkpoint. Use checkpoints.keep_epoch=true only "
+            "when resuming an interrupted phase-2 run."
+        )
 
 
 def set_seed(seed):

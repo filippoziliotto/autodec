@@ -992,7 +992,14 @@ shapenet:
 
 trainer:
   save_path: checkpoints
-  save_every_n_epochs: 50
+  save_every_n_epochs: 1
+  save_epoch_checkpoints: false
+  save_last: true
+  last_filename: last.pt
+  save_best: true
+  best_filename: best.pt
+  best_recon_metric: recon
+  best_scaffold_metric: null
   evaluate_every_n_epochs: 1
   num_epochs: 200
   batch_size: 32
@@ -1025,7 +1032,7 @@ Copy Phase 1 and change:
 run_name: autodec_phase2_mlp_d64
 checkpoints:
   encoder_from: null
-  resume_from: checkpoints/autodec_phase1_mlp_d64/epoch_200.pt
+  resume_from: checkpoints/autodec_phase1_mlp_d64/best.pt
   keep_epoch: false
 
 loss:

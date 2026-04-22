@@ -97,7 +97,14 @@ trainer:
   save_path: checkpoints
   log_metrics_to_file: true
   metrics_log_filename: metrics.jsonl
-  save_every_n_epochs: 50
+  save_every_n_epochs: 1
+  save_epoch_checkpoints: false
+  save_last: true
+  last_filename: last.pt
+  save_best: true
+  best_filename: best.pt
+  best_recon_metric: recon
+  best_scaffold_metric: null
   evaluate_every_n_epochs: 1
   num_epochs: 200
   batch_size: 4

@@ -73,6 +73,12 @@ checkpoint.
 
 Use `resume_from` to resume a full AutoDec checkpoint.
 
+For a fresh phase-2 start (`optimizer.phase: 2` and `keep_epoch: false`),
+`resume_from` must point to a `best.pt` checkpoint, normally
+`checkpoints/autodec_phase1/best.pt`. The training entrypoint rejects numbered
+or `last.pt` phase-1 checkpoints for this path. Set `keep_epoch: true` only
+when resuming an interrupted phase-2 run.
+
 ### `wandb`
 
 WandB is disabled unless:
@@ -305,6 +311,9 @@ save_path
 log_metrics_to_file
 metrics_log_filename
 save_every_n_epochs
+save_epoch_checkpoints
+save_last
+last_filename
 save_best
 best_filename
 best_recon_metric
@@ -327,6 +336,12 @@ For phase 2, `save_best: true` writes `best.pt` by default. Selection prefers
 lower validation `recon`, but only among checkpoints whose
 `scaffold_chamfer` is no worse than its running minimum by more than
 `best_scaffold_tolerance` (`0.05` by default).
+
+Phase 1 and phase 2 set `save_epoch_checkpoints: false`, `save_last: true`,
+and `last_filename: last.pt`, so checkpoint storage is limited to the
+overwritten `last.pt` plus `best.pt` instead of accumulating `epoch_*.pt`
+files. Phase 1 selects `best.pt` by validation `recon`; phase 2 selects by
+validation `recon` with the scaffold Chamfer guard.
 
 ### `optimizer`
 
@@ -497,7 +512,7 @@ Joint fine-tuning config.
 Key choices:
 
 ```text
-resume_from: checkpoints/autodec_phase1/epoch_200.pt
+resume_from: checkpoints/autodec_phase1/best.pt
 phase: 2
 category_split: all
 lambda_sq: 1.0

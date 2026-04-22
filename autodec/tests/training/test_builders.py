@@ -4,6 +4,7 @@ import sys
 import torch
 import torch.nn as nn
 from torch.utils.data import Subset
+import yaml
 
 
 class TinyAutoDec(nn.Module):
@@ -68,6 +69,51 @@ def _cfg(phase=1):
             betas=(0.9, 0.999),
         ),
     )
+
+
+def test_train_phase1_config_saves_best_and_last_only():
+    with open("autodec/configs/train_phase1.yaml", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+
+    trainer = cfg["trainer"]
+    assert trainer["save_every_n_epochs"] == 1
+    assert trainer["save_epoch_checkpoints"] is False
+    assert trainer["save_last"] is True
+    assert trainer["last_filename"] == "last.pt"
+    assert trainer["save_best"] is True
+    assert trainer["best_filename"] == "best.pt"
+    assert trainer["best_recon_metric"] == "recon"
+    assert trainer["best_scaffold_metric"] is None
+
+
+def test_train_phase2_config_resumes_from_phase1_best_checkpoint():
+    with open("autodec/configs/train_phase2.yaml", encoding="utf-8") as handle:
+        cfg = yaml.safe_load(handle)
+
+    assert cfg["checkpoints"]["resume_from"] == "checkpoints/autodec_phase1/best.pt"
+
+
+def test_phase2_start_requires_best_checkpoint_unless_resuming_epoch():
+    from autodec.training.builders import validate_phase2_start_checkpoint
+
+    cfg = SimpleNamespace(
+        optimizer=SimpleNamespace(phase=2),
+        checkpoints=SimpleNamespace(
+            resume_from="checkpoints/autodec_phase1/last.pt",
+            keep_epoch=False,
+        ),
+    )
+
+    try:
+        validate_phase2_start_checkpoint(cfg)
+    except ValueError as exc:
+        assert "best.pt" in str(exc)
+    else:
+        raise AssertionError("Expected phase 2 startup to reject non-best checkpoint")
+
+    cfg.checkpoints.resume_from = "checkpoints/autodec_phase2/last.pt"
+    cfg.checkpoints.keep_epoch = True
+    validate_phase2_start_checkpoint(cfg)
 
 
 def test_build_loss_constructs_autodec_loss_from_cfg():

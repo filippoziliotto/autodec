@@ -10,7 +10,7 @@ wandb:
 
 checkpoints:
   encoder_from: null
-  resume_from: checkpoints/autodec_phase2/epoch_200.pt
+  resume_from: checkpoints/autodec_phase2/best.pt
   strict_encoder: true
 
 autodec:

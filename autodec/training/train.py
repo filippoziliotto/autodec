@@ -15,6 +15,7 @@ from autodec.training.builders import (
     build_wandb_run,
     cfg_get,
     set_seed,
+    validate_phase2_start_checkpoint,
 )
 from autodec.training.metric_logger import EpochMetricLogger
 from autodec.training.trainer import AutoDecTrainer, is_main_process
@@ -52,6 +53,7 @@ def main(cfg: DictConfig):
 
     start_epoch = 0
     best_val_loss = float("inf")
+    validate_phase2_start_checkpoint(cfg)
     resume_from = getattr(cfg.checkpoints, "resume_from", None)
     if resume_from is not None:
         meta = load_autodec_checkpoint(

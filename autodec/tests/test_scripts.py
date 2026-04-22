@@ -42,6 +42,8 @@ def test_multigpu_pipeline_runs_phase_training_and_eval():
     assert "trainer.num_epochs=\"${PHASE1_EPOCHS}\"" in content
     assert "trainer.num_epochs=\"${PHASE2_EPOCHS}\"" in content
     assert "trainer.batch_size=\"${BATCH_SIZE_PER_GPU}\"" in content
+    assert 'PHASE1_CKPT="${PHASE1_CKPT:-${CHECKPOINT_ROOT}/${PHASE1_RUN_NAME}/best.pt}"' in content
+    assert 'PHASE2_CKPT="${PHASE2_CKPT:-${CHECKPOINT_ROOT}/${PHASE2_RUN_NAME}/best.pt}"' in content
     assert "checkpoints.resume_from=\"${PHASE1_CKPT}\"" in content
     assert "python -m autodec.eval.run" in content
     assert "checkpoints.resume_from=\"${PHASE2_CKPT}\"" in content

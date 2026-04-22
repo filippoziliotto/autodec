@@ -248,6 +248,53 @@ def test_autodec_trainer_saves_best_checkpoint_with_recon_and_scaffold_guard(tmp
     assert checkpoint["val_loss"] == 8.5
 
 
+def test_autodec_trainer_can_save_only_best_and_last_checkpoints(tmp_path):
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": [{"points": torch.ones(2, 3, 3)}],
+    }
+    model = TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    loss_fn = ScriptedValidationLoss(
+        [
+            {"all": 3.0, "recon": 3.0, "scaffold_chamfer": 1.0},
+            {"all": 2.0, "recon": 2.0, "scaffold_chamfer": 1.0},
+            {"all": 1.0, "recon": 1.0, "scaffold_chamfer": 1.0},
+        ]
+    )
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=loss_fn,
+        ctx=SimpleNamespace(
+            num_epochs=3,
+            save_path=str(tmp_path),
+            save_every_n_epochs=1,
+            evaluate_every_n_epochs=1,
+            save_epoch_checkpoints=False,
+            save_last=True,
+            last_filename="last.pt",
+            save_best=True,
+            best_filename="best.pt",
+            best_recon_metric="recon",
+            best_scaffold_metric="scaffold_chamfer",
+            best_scaffold_tolerance=0.05,
+        ),
+        device=torch.device("cpu"),
+    )
+
+    trainer.train()
+
+    assert sorted(path.name for path in tmp_path.glob("*.pt")) == ["best.pt", "last.pt"]
+    last_checkpoint = torch.load(tmp_path / "last.pt", map_location="cpu", weights_only=False)
+    assert last_checkpoint["epoch"] == 2
+    assert last_checkpoint["val_loss"] == 1.0
+
+
 def test_autodec_trainer_logs_train_metrics_when_epoch_is_not_evaluated(tmp_path):
     from autodec.training.metric_logger import EpochMetricLogger
     from autodec.training.trainer import AutoDecTrainer

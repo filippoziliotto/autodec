@@ -139,7 +139,7 @@ bash autodec/scripts/run_phase2.sh
 Useful override example:
 
 ```bash
-bash autodec/scripts/run_phase2.sh checkpoints.resume_from=checkpoints/autodec_phase1/epoch_10.pt
+bash autodec/scripts/run_phase2.sh checkpoints.resume_from=checkpoints/autodec_phase1/best.pt
 ```
 
 ## `run_all.sh`
@@ -182,14 +182,14 @@ visualizations under `data/eval/<run_name>/`.
 Expected use:
 
 ```bash
-bash autodec/scripts/run_eval_test.sh checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt
+bash autodec/scripts/run_eval_test.sh checkpoints.resume_from=checkpoints/autodec_phase2/best.pt
 ```
 
 Useful all-category WandB example:
 
 ```bash
 bash autodec/scripts/run_eval_test.sh \
-  checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt \
+  checkpoints.resume_from=checkpoints/autodec_phase2/best.pt \
   use_wandb=true \
   wandb.project=autodec
 ```
@@ -199,7 +199,7 @@ For the SuperDec out-of-category held-out classes, use:
 ```bash
 python -m autodec.eval.run \
   --config-name eval_test_out_category \
-  checkpoints.resume_from=checkpoints/autodec_phase2/epoch_200.pt
+  checkpoints.resume_from=checkpoints/autodec_phase2/best.pt
 ```
 
 ## `run_multigpu_pipeline.sh`
@@ -228,13 +228,13 @@ EVAL_RUN_NAME=autodec_test_eval_ddp${NUM_GPUS}_phase2_200ep_bs8
 Phase 2 automatically resumes:
 
 ```text
-${CHECKPOINT_ROOT}/${PHASE1_RUN_NAME}/epoch_${PHASE1_EPOCHS}.pt
+${CHECKPOINT_ROOT}/${PHASE1_RUN_NAME}/best.pt
 ```
 
 Evaluation automatically loads:
 
 ```text
-${CHECKPOINT_ROOT}/${PHASE2_RUN_NAME}/epoch_${PHASE2_EPOCHS}.pt
+${CHECKPOINT_ROOT}/${PHASE2_RUN_NAME}/best.pt
 ```
 
 Training uses `torchrun` for DDP. Evaluation runs once in a single process

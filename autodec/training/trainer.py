@@ -110,6 +110,9 @@ class AutoDecTrainer:
         )
         self.save_best = bool(getattr(ctx, "save_best", False))
         self.best_filename = getattr(ctx, "best_filename", "best.pt")
+        self.save_epoch_checkpoints = bool(getattr(ctx, "save_epoch_checkpoints", True))
+        self.save_last = bool(getattr(ctx, "save_last", False))
+        self.last_filename = getattr(ctx, "last_filename", "last.pt")
         self.best_recon_metric = getattr(ctx, "best_recon_metric", "recon")
         self.best_scaffold_metric = getattr(
             ctx,
@@ -143,6 +146,12 @@ class AutoDecTrainer:
         if not is_main_process() or self.save_path is None:
             return None
         path = Path(self.save_path) / self.best_filename
+        return self._save_checkpoint(epoch, val_loss, path)
+
+    def save_last_checkpoint(self, epoch, val_loss):
+        if not is_main_process() or self.save_path is None:
+            return None
+        path = Path(self.save_path) / self.last_filename
         return self._save_checkpoint(epoch, val_loss, path)
 
     def _metric_value(self, metrics, name, default=None):
@@ -390,4 +399,7 @@ class AutoDecTrainer:
             )
             do_save = (epoch + 1) % save_every == 0 or epoch == self.num_epochs - 1
             if do_save:
-                self.save_checkpoint(epoch, val_loss)
+                if self.save_epoch_checkpoints:
+                    self.save_checkpoint(epoch, val_loss)
+                if self.save_last:
+                    self.save_last_checkpoint(epoch, val_loss)

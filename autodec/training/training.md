@@ -431,13 +431,22 @@ and writes:
 epoch_{epoch + 1}.pt
 ```
 
-inside `ctx.save_path`.
+inside `ctx.save_path` when `ctx.save_epoch_checkpoints` is true. This remains
+the default for backward compatibility.
+
+When `ctx.save_last` is true, the trainer writes `ctx.last_filename` (`last.pt`
+by default) at each save point, overwriting the previous last checkpoint.
 
 When `ctx.save_best` is true, the trainer also writes `ctx.best_filename`
 (`best.pt` by default) after validation. The default phase-2 policy selects a
 lower `recon` checkpoint only if its `scaffold_chamfer` is within
 `1 + ctx.best_scaffold_tolerance` of the running minimum scaffold Chamfer, so
 the dense reconstruction cannot improve by silently degrading the SQ scaffold.
+
+The phase-1 and phase-2 configs disable epoch checkpoints and save every epoch
+to `last.pt`, leaving only `best.pt` and `last.pt` in each checkpoint
+directory. Phase 1 chooses `best.pt` by validation `recon`; phase 2 chooses by
+validation `recon` with the scaffold Chamfer guard.
 
 ## `train.py`
 
@@ -470,12 +479,13 @@ Responsibilities:
 3. Build model, loss, dataloaders, optimizer, scheduler.
 4. Optionally initialize WandB from `cfg.use_wandb`.
 5. Optionally build `AutoDecEpochVisualizer` from `cfg.visualization`.
-6. Optionally resume a full AutoDec checkpoint from
+6. Validate that a fresh phase-2 start resumes from a `best.pt` checkpoint.
+7. Optionally resume a full AutoDec checkpoint from
    `cfg.checkpoints.resume_from`.
-7. Wrap model in DDP if needed.
-8. Save the resolved config into the run checkpoint folder.
-9. Build `EpochMetricLogger` when `trainer.log_metrics_to_file` is true.
-10. Run `AutoDecTrainer.train()`.
+8. Wrap model in DDP if needed.
+9. Save the resolved config into the run checkpoint folder.
+10. Build `EpochMetricLogger` when `trainer.log_metrics_to_file` is true.
+11. Run `AutoDecTrainer.train()`.
 
 The entrypoint imports Hydra directly, so actual CLI use still requires
 `hydra-core`.
