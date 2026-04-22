@@ -14,9 +14,15 @@ Verifies the pure, non-server pieces of the local test visualization browser:
 - recursive sample discovery from run, epoch, or direct sample paths
 - complete-sample validation for `sq_mesh.obj`, `reconstruction.ply`, and
   `input_gt.ply`
+- optional `sq_mesh_lm.obj` discovery for the LM SQ pane
 - optional `metadata.json` loading
 - CLI argument parsing without importing Viser
-- wrapper HTML containing three panes and Back/Forward endpoints
+- wrapper HTML containing four panes and Back/Forward endpoints
+- OBJ/MTL material parsing for per-primitive SQ colors in the viewer
+- opaque SQ material export and viewer fallback for older transparent OBJ files
+- Viser pane routing so original SQ, LM SQ, reconstruction, and GT each load
+  their own sample artifact
+- viewer port preflight so stale servers cannot be embedded under new labels
 
 ### `test_epoch_visualizer_writes_gt_sq_mesh_and_reconstruction`
 

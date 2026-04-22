@@ -2,6 +2,7 @@ import argparse
 import html
 import json
 import re
+import socket
 import sys
 import threading
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ REQUIRED_SAMPLE_FILES = ("sq_mesh.obj", "reconstruction.ply", "input_gt.ply")
 class EvalVisualizationSample:
     sample_dir: Path
     sq_mesh_path: Path
+    sq_mesh_lm_path: Path | None
     reconstruction_path: Path
     gt_path: Path
     metadata_path: Path
@@ -34,9 +36,11 @@ def _is_complete_sample_dir(path):
 
 
 def _sample_from_dir(path):
+    lm_path = path / "sq_mesh_lm.obj"
     return EvalVisualizationSample(
         sample_dir=path,
         sq_mesh_path=path / "sq_mesh.obj",
+        sq_mesh_lm_path=lm_path if lm_path.is_file() else None,
         reconstruction_path=path / "reconstruction.ply",
         gt_path=path / "input_gt.ply",
         metadata_path=path / "metadata.json",
@@ -88,10 +92,11 @@ def _json_payload_for_sample(sample, index, total):
 
 
 def render_wrapper_html(title, pane_urls, dark_mode=True):
-    """Return the browser wrapper page for the three embedded Viser panes."""
+    """Return the browser wrapper page for the four embedded Viser panes."""
 
     escaped_title = html.escape(title)
     sq_url = html.escape(pane_urls["sq"], quote=True)
+    lm_sq_url = html.escape(pane_urls["lm_sq"], quote=True)
     reconstruction_url = html.escape(pane_urls["reconstruction"], quote=True)
     gt_url = html.escape(pane_urls["gt"], quote=True)
     initial_theme = "dark" if dark_mode else "light"
@@ -188,7 +193,7 @@ def render_wrapper_html(title, pane_urls, dark_mode=True):
     }}
     .panes {{
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 6px;
       padding: 6px;
       flex: 1;
@@ -284,7 +289,7 @@ def render_wrapper_html(title, pane_urls, dark_mode=True):
   <header>
     <h1>{escaped_title}</h1>
     <div class="controls">
-      <button onclick="navigateSample('/api/sample/previous')">&#8592; Prev</button>
+      <button onclick="navigateSample('/api/sample/previous')">&#8592; Previous</button>
       <div id="counter">—</div>
       <button onclick="navigateSample('/api/sample/next')">Next &#8594;</button>
       <button id="theme-btn" onclick="toggleTheme()" title="Toggle dark/light mode">🌙</button>
@@ -292,8 +297,12 @@ def render_wrapper_html(title, pane_urls, dark_mode=True):
   </header>
   <main class="panes">
     <section class="pane">
-      <div class="pane-label">Superquadric reconstruction</div>
-      <iframe title="Superquadric reconstruction" src="{sq_url}"></iframe>
+      <div class="pane-label">Original SQ</div>
+      <iframe title="Original SQ" src="{sq_url}"></iframe>
+    </section>
+    <section class="pane">
+      <div class="pane-label">LM optimized SQ</div>
+      <iframe title="LM optimized SQ" src="{lm_sq_url}"></iframe>
     </section>
     <section class="pane">
       <div class="pane-label">Point reconstruction</div>
@@ -369,7 +378,7 @@ def render_wrapper_html(title, pane_urls, dark_mode=True):
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(
-        description="View AutoDec test visualization outputs in three Viser panes."
+        description="View AutoDec test visualization outputs in four Viser panes."
     )
     parser.add_argument(
         "visualization_output_path",
@@ -380,6 +389,12 @@ def build_arg_parser():
     parser.add_argument("--wrapper-port", type=int, default=8090, help="Flask wrapper port.")
     parser.add_argument("--sq-port", type=int, default=8091, help="Superquadric Viser port.")
     parser.add_argument(
+        "--lm-sq-port",
+        type=int,
+        default=8094,
+        help="LM-optimized superquadric Viser port.",
+    )
+    parser.add_argument(
         "--reconstruction-port",
         type=int,
         default=8092,
@@ -388,6 +403,45 @@ def build_arg_parser():
     parser.add_argument("--gt-port", type=int, default=8093, help="Ground-truth Viser port.")
     parser.add_argument("--point-size", type=float, default=0.005, help="Viser point size.")
     return parser
+
+
+def _viewer_ports(args):
+    return {
+        "wrapper": args.wrapper_port,
+        "original SQ": args.sq_port,
+        "LM SQ": args.lm_sq_port,
+        "reconstruction": args.reconstruction_port,
+        "ground truth": args.gt_port,
+    }
+
+
+def _assert_viewer_ports_available(args):
+    ports = _viewer_ports(args)
+    by_port = {}
+    for name, port in ports.items():
+        by_port.setdefault(port, []).append(name)
+
+    duplicates = {
+        port: names for port, names in by_port.items() if len(names) > 1
+    }
+    if duplicates:
+        details = ", ".join(
+            f"{port}: {', '.join(names)}" for port, names in sorted(duplicates.items())
+        )
+        raise ValueError(f"Found duplicate viewer ports: {details}")
+
+    occupied = []
+    for name, port in ports.items():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.25)
+            if sock.connect_ex((args.host, int(port))) == 0:
+                occupied.append(f"{name}={port}")
+    if occupied:
+        raise RuntimeError(
+            "Viewer ports are already in use: "
+            + ", ".join(occupied)
+            + ". Stop the old viewer process or pass different --*-port values."
+        )
 
 
 def _patch_trimesh_numpy2():
@@ -447,16 +501,102 @@ def _set_default_scene(server):
         client.camera.look_at = (0.0, 0.0, 0.0)
 
 
+def _parse_mtl_colors(mtl_path):
+    colors = {}
+    current = None
+    kd = None
+    alpha = 1.0
+
+    if not mtl_path.is_file():
+        return colors
+
+    def flush_material():
+        if current is None or kd is None:
+            return
+        rgba = [int(round(np.clip(channel, 0.0, 1.0) * 255.0)) for channel in kd]
+        rgba.append(int(round(np.clip(alpha, 0.0, 1.0) * 255.0)))
+        colors[current] = rgba
+
+    with mtl_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            keyword = parts[0]
+            if keyword == "newmtl" and len(parts) >= 2:
+                flush_material()
+                current = parts[1]
+                kd = None
+                alpha = 1.0
+            elif keyword == "Kd" and len(parts) >= 4:
+                kd = [float(parts[1]), float(parts[2]), float(parts[3])]
+            elif keyword in {"d", "Tr"} and len(parts) >= 2:
+                alpha = float(parts[1])
+        flush_material()
+    return colors
+
+
+def _obj_material_face_colors(obj_path, face_count):
+    """Return per-face RGBA colors from OBJ material groups when available."""
+
+    obj_path = Path(obj_path)
+    material_libraries = []
+    face_materials = []
+    current_material = None
+
+    with obj_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            keyword = parts[0]
+            if keyword == "mtllib":
+                material_libraries.extend(parts[1:])
+            elif keyword == "usemtl" and len(parts) >= 2:
+                current_material = parts[1]
+            elif keyword == "f":
+                vertex_count = max(0, len(parts) - 1)
+                triangle_count = max(1, vertex_count - 2)
+                face_materials.extend([current_material] * triangle_count)
+
+    if not material_libraries or len(face_materials) != face_count:
+        return None
+
+    colors = {}
+    for library in material_libraries:
+        colors.update(_parse_mtl_colors(obj_path.parent / library))
+
+    if not colors:
+        return None
+
+    fallback = [180, 180, 180, 255]
+    return np.asarray(
+        [colors.get(material, fallback) for material in face_materials],
+        dtype=np.uint8,
+    )
+
+
 class _ViserPane:
     def __init__(self, server, pane_type, trimesh_module, point_size):
         self.server = server
         self.pane_type = pane_type
         self.trimesh = trimesh_module
         self.point_size = point_size
+        self._scene_handle = None
 
     def load(self, sample):
         if self.pane_type == "sq":
-            self._load_mesh(sample.sq_mesh_path)
+            self._load_mesh(sample.sq_mesh_path, "/original_superquadric")
+        elif self.pane_type == "lm_sq":
+            if sample.sq_mesh_lm_path is None:
+                self._load_empty_mesh("/lm_optimized_superquadric")
+            else:
+                self._load_mesh(
+                    sample.sq_mesh_lm_path,
+                    "/lm_optimized_superquadric",
+                )
         elif self.pane_type == "reconstruction":
             self._load_point_cloud(sample.reconstruction_path, "/point_reconstruction")
         elif self.pane_type == "gt":
@@ -464,16 +604,41 @@ class _ViserPane:
         else:
             raise ValueError(f"Unknown pane type: {self.pane_type}")
 
-    def _load_mesh(self, path):
+    def _load_mesh(self, path, name):
         mesh = self.trimesh.load(path, force="mesh", process=False)
-        mesh.visual = mesh.visual.to_color()
-        face_colors = np.asarray(mesh.visual.face_colors, dtype=np.uint8).copy()
+        obj_face_colors = (
+            _obj_material_face_colors(path, len(mesh.faces))
+            if Path(path).suffix.lower() == ".obj"
+            else None
+        )
+        if obj_face_colors is not None:
+            face_colors = obj_face_colors
+        else:
+            mesh.visual = mesh.visual.to_color()
+            face_colors = np.asarray(mesh.visual.face_colors, dtype=np.uint8).copy()
         if face_colors.ndim == 2 and face_colors.shape[1] == 4:
             face_colors[:, 3] = 255
-        mesh.visual.face_colors = face_colors
-        self.server.scene.add_mesh_trimesh(
-            name="/superquadric_reconstruction",
+        mesh.visual = self.trimesh.visual.color.ColorVisuals(
             mesh=mesh,
+            face_colors=face_colors,
+        )
+        self._clear_scene_handle()
+        self._scene_handle = self.server.scene.add_mesh_trimesh(
+            name=name,
+            mesh=mesh,
+            visible=True,
+        )
+
+    def _load_empty_mesh(self, name):
+        empty = self.trimesh.Trimesh(
+            vertices=np.zeros((0, 3), dtype=np.float32),
+            faces=np.zeros((0, 3), dtype=np.int64),
+            process=False,
+        )
+        self._clear_scene_handle()
+        self._scene_handle = self.server.scene.add_mesh_trimesh(
+            name=name,
+            mesh=empty,
             visible=True,
         )
 
@@ -481,13 +646,19 @@ class _ViserPane:
         rows = read_point_cloud_ply(path)
         points = rows[:, :3].astype(np.float32, copy=False)
         colors = np.clip(rows[:, 3:6], 0, 255).astype(np.uint8, copy=False)
-        self.server.scene.add_point_cloud(
+        self._clear_scene_handle()
+        self._scene_handle = self.server.scene.add_point_cloud(
             name=name,
             points=points,
             colors=colors,
             point_size=self.point_size,
             visible=True,
         )
+
+    def _clear_scene_handle(self):
+        if self._scene_handle is not None and hasattr(self._scene_handle, "remove"):
+            self._scene_handle.remove()
+        self._scene_handle = None
 
 
 class _EvalViewerRuntime:
@@ -508,6 +679,7 @@ class _EvalViewerRuntime:
     def pane_urls(self):
         return {
             "sq": f"http://{self.args.host}:{self.args.sq_port}",
+            "lm_sq": f"http://{self.args.host}:{self.args.lm_sq_port}",
             "reconstruction": f"http://{self.args.host}:{self.args.reconstruction_port}",
             "gt": f"http://{self.args.host}:{self.args.gt_port}",
         }
@@ -515,6 +687,7 @@ class _EvalViewerRuntime:
     def start_panes(self):
         specs = {
             "sq": self.args.sq_port,
+            "lm_sq": self.args.lm_sq_port,
             "reconstruction": self.args.reconstruction_port,
             "gt": self.args.gt_port,
         }
@@ -605,6 +778,7 @@ class _EvalViewerRuntime:
 
 def run_viewer(args):
     samples = discover_samples(args.visualization_output_path)
+    _assert_viewer_ports_available(args)
     Flask, jsonify, Response, trimesh_module, viser = _import_runtime_dependencies()
     runtime = _EvalViewerRuntime(args, samples, Flask, jsonify, Response, trimesh_module, viser)
     runtime.run()

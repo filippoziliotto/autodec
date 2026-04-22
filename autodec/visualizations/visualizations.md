@@ -119,7 +119,8 @@ This writes:
 - `sq_mesh_lm.obj`: optional active scaffold after LM refinement. Test
   evaluation uses this only as an extra qualitative artifact.
 - `sq_mesh.mtl`: material colors for the scaffold, one material per active
-  primitive color group.
+  primitive color group. SQ mesh materials are opaque so the viewer renders the
+  external surface rather than a see-through volume.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
 - `metadata.json`: epoch, split, sample index, point counts, active primitive count.
   Training may add category, model id, and dataset index metadata when
@@ -179,11 +180,32 @@ reconstruction.ply
 input_gt.ply
 ```
 
-The command starts three Viser panes plus one lightweight Flask wrapper page and
-prints the wrapper URL. It does not open a browser automatically. The wrapper
-page provides Back/Forward navigation and embeds independently interactive panes
-for the superquadric mesh, decoded point reconstruction, and ground-truth point
-cloud.
+If present, `sq_mesh_lm.obj` is detected automatically and shown in a separate
+LM-optimized SQ pane. The command starts four Viser panes plus one lightweight
+Flask wrapper page and prints the wrapper URL. It does not open a browser
+automatically. The wrapper page provides Back/Forward navigation and embeds
+independently interactive panes in this order: original SQ, LM-optimized SQ,
+decoded point reconstruction, and ground-truth point cloud.
+
+Default ports:
+
+```text
+wrapper: 8090
+original SQ: 8091
+reconstruction: 8092
+ground truth: 8093
+LM SQ: 8094
+```
+
+OBJ material groups are parsed from the exported `.mtl` files before sending SQ
+meshes to Viser, so each active primitive keeps its assigned color in the
+browser. Each pane replaces its previous scene object when navigating samples,
+so stale SQ geometry is not kept in point-cloud panes.
+
+Before importing Viser, the viewer checks that all five ports are unique and
+not already occupied. If a previous viewer is still listening on one of these
+ports, startup fails with the occupied pane names instead of embedding stale
+servers under the new labels.
 
 `viser` is imported lazily at runtime, so tests and non-viewer visualization
 utilities can still import the module in environments where Viser is not
@@ -235,6 +257,7 @@ evaluates the signed-power superquadric surface on a regular `(eta, omega)`
 grid, applies the predicted rotation and translation, and exports active
 primitive meshes with deterministic colors. Mesh generation defensively clamps
 shape exponents to `[0.1, 2.0]`, matching the sampler's valid exponent range.
+Exported OBJ/PLY face colors use full opacity.
 
 ### `build_sq_mesh`
 

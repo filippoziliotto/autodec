@@ -230,8 +230,9 @@ def test_sq_mesh_export_assigns_distinct_materials_per_primitive(tmp_path):
     assert "usemtl primitive_0001" in obj_text
     assert "newmtl primitive_0000" in mtl_text
     assert "newmtl primitive_0001" in mtl_text
-    assert "Kd 0.901961 0.223529 0.274510" in mtl_text
-    assert "Kd 0.113725 0.207843 0.341176" in mtl_text
+    assert "Kd 1.000000 0.196078 0.196078" in mtl_text
+    assert "Kd 0.196078 0.705882 1.000000" in mtl_text
+    assert mtl_text.splitlines().count("d 1.000000") == 2
 
 
 def test_sq_mesh_vertices_clamp_out_of_range_shape_exponents():
