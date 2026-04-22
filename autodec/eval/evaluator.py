@@ -42,6 +42,25 @@ def _batch_value(batch, key, sample_index, default=None):
     return value
 
 
+_LM_OUTDICT_KEYS = (
+    "assign_matrix",
+    "scale",
+    "shape",
+    "rotate",
+    "trans",
+    "exist",
+    "exist_logit",
+)
+
+
+def _clone_lm_outdict(outdict):
+    return {
+        key: value.detach().clone() if torch.is_tensor(value) else value
+        for key, value in outdict.items()
+        if key in _LM_OUTDICT_KEYS
+    }
+
+
 class AutoDecEvaluator:
     """Standalone test evaluator for trained AutoDec checkpoints."""
 
@@ -120,6 +139,43 @@ class AutoDecEvaluator:
         )
         return result
 
+    def _model_encoder(self):
+        model = getattr(self.model, "module", self.model)
+        return getattr(model, "encoder", None)
+
+    def _visualization_lm_optimizer(self):
+        encoder = self._model_encoder()
+        optimizer = getattr(encoder, "lm_optimizer", None)
+        if optimizer is not None:
+            return optimizer
+        if self.device.type != "cuda":
+            raise RuntimeError(
+                "visualization.write_lm_optimized_sq_mesh requires CUDA unless "
+                "a test LM optimizer is injected on model.encoder.lm_optimizer."
+            )
+        if encoder is None:
+            raise TypeError("LM mesh export requires a model with AutoDecEncoder")
+
+        from superdec.lm_optimization.lm_optimizer import LMOptimizer
+
+        optimizer = LMOptimizer()
+        if hasattr(optimizer, "to"):
+            optimizer = optimizer.to(self.device)
+        return optimizer
+
+    def _should_write_lm_sq_mesh(self):
+        vis_cfg = cfg_get(self.cfg, "visualization")
+        return (
+            self.split == "test"
+            and cfg_get(vis_cfg, "write_lm_optimized_sq_mesh", False)
+        )
+
+    def _lm_optimized_outdict(self, outdict, batch):
+        if not self._should_write_lm_sq_mesh():
+            return None
+        optimizer = self._visualization_lm_optimizer()
+        return optimizer(_clone_lm_outdict(outdict), batch["points"].float())
+
     def _evaluate_loader(self):
         eval_cfg = cfg_get(self.cfg, "eval")
         compute_loss = cfg_get(eval_cfg, "compute_loss_metrics", True)
@@ -178,13 +234,9 @@ class AutoDecEvaluator:
 
     def _visualization_selection(self):
         vis_cfg = cfg_get(self.cfg, "visualization")
-        num_samples = cfg_get(vis_cfg, "num_samples", 20)
-        min_categories = cfg_get(vis_cfg, "min_categories", 5)
-        samples_per_category = cfg_get(vis_cfg, "samples_per_category", 4)
+        samples_per_category = cfg_get(vis_cfg, "samples_per_category", 2)
         return select_category_balanced_indices(
             self.dataset,
-            num_samples=num_samples,
-            min_categories=min_categories,
             samples_per_category=samples_per_category,
         )
 
@@ -197,14 +249,18 @@ class AutoDecEvaluator:
         batch = default_collate(items)
         batch = move_batch_to_device(batch, self.device)
         outdict = self.model(batch["points"].float())
+        lm_outdict = self._lm_optimized_outdict(outdict, batch)
         outdict = self._maybe_prune_outdict(outdict, batch)
-        records = self.visualizer.write_epoch(
-            batch=batch,
-            outdict=outdict,
-            epoch=0,
-            split=self.split,
-            num_samples=len(selection),
-        )
+        write_kwargs = {
+            "batch": batch,
+            "outdict": outdict,
+            "epoch": 0,
+            "split": self.split,
+            "num_samples": len(selection),
+        }
+        if lm_outdict is not None:
+            write_kwargs["lm_outdict"] = lm_outdict
+        records = self.visualizer.write_epoch(**write_kwargs)
 
         checkpoint_cfg = cfg_get(self.cfg, "checkpoints")
         checkpoint = cfg_get(checkpoint_cfg, "resume_from")

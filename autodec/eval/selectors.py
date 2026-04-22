@@ -1,6 +1,5 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from math import ceil
 
 
 @dataclass(frozen=True)
@@ -19,20 +18,12 @@ def _dataset_models(dataset):
 
 def select_category_balanced_indices(
     dataset,
-    num_samples=20,
-    min_categories=5,
-    samples_per_category=4,
+    samples_per_category=2,
     categories=None,
 ):
-    """Select deterministic ShapeNet test samples balanced across categories."""
+    """Select deterministic ShapeNet test samples from every category."""
 
-    num_samples = int(num_samples)
-    min_categories = int(min_categories)
     samples_per_category = int(samples_per_category)
-    if num_samples <= 0:
-        raise ValueError("num_samples must be positive")
-    if min_categories <= 0:
-        raise ValueError("min_categories must be positive")
     if samples_per_category <= 0:
         raise ValueError("samples_per_category must be positive")
 
@@ -46,18 +37,13 @@ def select_category_balanced_indices(
             continue
         grouped[category].append((dataset_index, model.get("model_id", str(dataset_index))))
 
-    target_category_count = max(min_categories, ceil(num_samples / samples_per_category))
     available_categories = sorted(grouped)
-    if len(available_categories) < target_category_count:
-        raise ValueError(
-            f"Need at least {target_category_count} categories with test samples, "
-            f"found {len(available_categories)}"
-        )
+    if not available_categories:
+        raise ValueError("No categories with test samples found")
 
     selected = []
-    remaining = num_samples
-    for category in available_categories[:target_category_count]:
-        need = min(samples_per_category, remaining)
+    for category in available_categories:
+        need = samples_per_category
         candidates = grouped[category]
         if len(candidates) < need:
             raise ValueError(
@@ -71,9 +57,5 @@ def select_category_balanced_indices(
                     model_id=model_id,
                 )
             )
-        remaining -= need
-        if remaining <= 0:
-            break
 
     return sorted(selected, key=lambda item: item.dataset_index)
-

@@ -26,6 +26,7 @@ Checks that `AutoDecEpochVisualizer.write_epoch` writes:
 
 - `input_gt.ply`
 - `sq_mesh.obj`
+- optional `sq_mesh_lm.obj`
 - `reconstruction.ply`
 - `metadata.json`
 

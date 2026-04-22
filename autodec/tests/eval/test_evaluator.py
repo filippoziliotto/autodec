@@ -123,6 +123,25 @@ class TinyLMModel(nn.Module):
         self.encoder.enable_lm_optimization = enable_lm_optimization
 
 
+class RecordingEvalLMOptimizer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, outdict, points):
+        self.calls += 1
+        result = dict(outdict)
+        result["trans"] = outdict["trans"] + 1.0
+        return result
+
+
+class LMMeshEvalModel(TinyEvalModel):
+    def __init__(self):
+        super().__init__()
+        self.lm_optimizer = RecordingEvalLMOptimizer()
+        self.encoder = SimpleNamespace(lm_optimizer=self.lm_optimizer)
+
+
 class TinyVisualizer:
     def __init__(self, root):
         self.root = Path(root)
@@ -176,9 +195,7 @@ def _cfg(tmp_path):
         ),
         visualization=SimpleNamespace(
             enabled=True,
-            num_samples=20,
-            min_categories=5,
-            samples_per_category=4,
+            samples_per_category=2,
             log_to_wandb=False,
         ),
     )
@@ -210,7 +227,7 @@ def test_eval_dataset_builder_applies_shapenet_category_split(monkeypatch):
     assert calls == [("test", PAPER_UNSEEN_CATEGORIES)]
 
 
-def test_evaluator_writes_metrics_and_twenty_category_visualizations(tmp_path):
+def test_evaluator_writes_metrics_and_two_visualizations_per_category(tmp_path):
     from autodec.eval.evaluator import AutoDecEvaluator
 
     evaluator = AutoDecEvaluator(
@@ -227,14 +244,14 @@ def test_evaluator_writes_metrics_and_twenty_category_visualizations(tmp_path):
     per_sample_path = tmp_path / "eval_debug" / "per_sample_metrics.jsonl"
     assert metrics_path.exists()
     assert per_sample_path.exists()
-    assert result["num_visualizations"] == 20
+    assert result["num_visualizations"] == 10
     assert result["visualized_categories"] == ["a", "b", "c", "d", "e"]
     assert "paper_chamfer_l1" in result["metrics"]
     assert "paper_f_score_tau_0_01" in result["metrics"]
     assert "recon" in result["metrics"]
 
     metadata_paths = sorted((tmp_path / "viz").glob("test/sample_*/metadata.json"))
-    assert len(metadata_paths) == 20
+    assert len(metadata_paths) == 10
     metadata = [json.loads(path.read_text()) for path in metadata_paths]
     assert {item["category"] for item in metadata} == {"a", "b", "c", "d", "e"}
     assert all(item["checkpoint"] == "checkpoint.pt" for item in metadata)
@@ -324,8 +341,6 @@ def test_evaluator_sends_pruned_decoded_points_to_visualizer(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.eval.prune_decoded_points = True
     cfg.eval.prune_target_count = 1
-    cfg.visualization.num_samples = 1
-    cfg.visualization.min_categories = 1
     cfg.visualization.samples_per_category = 1
     visualizer = CaptureVisualizer()
     evaluator = AutoDecEvaluator(
@@ -338,7 +353,66 @@ def test_evaluator_sends_pruned_decoded_points_to_visualizer(tmp_path):
 
     evaluator.evaluate()
 
-    assert visualizer.decoded_shape == (1, 1, 3)
+    assert visualizer.decoded_shape == (5, 1, 3)
+
+
+def test_evaluator_passes_lm_outdict_to_visualizer_only_for_test_split(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    class CaptureLMVisualizer:
+        def __init__(self):
+            self.outdict = None
+            self.lm_outdict = None
+
+        def write_epoch(self, batch, outdict, epoch, split, num_samples, lm_outdict=None):
+            self.outdict = outdict
+            self.lm_outdict = lm_outdict
+            return TinyVisualizer(tmp_path / "viz").write_epoch(
+                batch,
+                outdict,
+                epoch,
+                split,
+                num_samples,
+            )
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.compute_loss_metrics = False
+    cfg.eval.compute_paper_metrics = False
+    cfg.visualization.samples_per_category = 1
+    cfg.visualization.write_lm_optimized_sq_mesh = True
+    model = LMMeshEvalModel()
+    visualizer = CaptureLMVisualizer()
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=model,
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=visualizer,
+    )
+
+    evaluator.evaluate()
+
+    assert model.lm_optimizer.calls == 1
+    assert torch.allclose(visualizer.outdict["trans"], torch.zeros(1, 1, 3))
+    assert visualizer.outdict["decoded_points"].shape == (5, 3, 3)
+    assert torch.allclose(visualizer.outdict["decoded_points"][0], torch.full((3, 3), 0.1))
+    assert torch.allclose(visualizer.lm_outdict["trans"], torch.ones(1, 1, 3))
+
+    cfg.eval.split = "val"
+    model = LMMeshEvalModel()
+    visualizer = CaptureLMVisualizer()
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=model,
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=visualizer,
+    )
+
+    evaluator.evaluate()
+
+    assert model.lm_optimizer.calls == 0
+    assert visualizer.lm_outdict is None
 
 
 def test_eval_lm_optimization_flag_is_disabled_by_default(tmp_path):
@@ -365,6 +439,22 @@ def test_eval_lm_optimization_flag_requires_cuda(tmp_path):
         assert "requires CUDA" in str(exc)
     else:
         raise AssertionError("Expected CUDA guard to reject LM optimization on CPU")
+
+
+def test_eval_rejects_global_lm_when_writing_separate_lm_mesh(tmp_path):
+    from autodec.eval.run import maybe_enable_lm_optimization
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.use_lm_optimization = True
+    cfg.visualization.write_lm_optimized_sq_mesh = True
+
+    try:
+        maybe_enable_lm_optimization(TinyLMModel(), cfg, torch.device("cuda"))
+    except ValueError as exc:
+        assert "eval.use_lm_optimization" in str(exc)
+        assert "write_lm_optimized_sq_mesh" in str(exc)
+    else:
+        raise AssertionError("Expected mutually exclusive LM modes to be rejected")
 
 
 def test_eval_lm_optimization_flag_enables_encoder_on_cuda(tmp_path):

@@ -17,6 +17,7 @@ writer creates:
 data/viz/autodec_phase1/val/epoch_0003/sample_0000/
   input_gt.ply
   sq_mesh.obj
+  sq_mesh_lm.obj        # optional, test eval only
   reconstruction.ply
   metadata.json
 ```
@@ -57,6 +58,7 @@ sample_index
 sample_dir
 input_path
 sq_mesh_path
+sq_mesh_lm_path
 reconstruction_path
 metadata_path
 ```
@@ -103,6 +105,7 @@ visualizer = AutoDecEpochVisualizer(
 records = visualizer.write_epoch(
     batch=batch,
     outdict=outdict,
+    lm_outdict=lm_outdict,  # optional
     epoch=epoch,
     split="val",
     num_samples=1,
@@ -113,6 +116,8 @@ This writes:
 
 - `input_gt.ply`: the input or target point cloud.
 - `sq_mesh.obj`: the active predicted superquadric scaffold as a mesh.
+- `sq_mesh_lm.obj`: optional active scaffold after LM refinement. Test
+  evaluation uses this only as an extra qualitative artifact.
 - `sq_mesh.mtl`: material colors for the scaffold, one material per active
   primitive color group.
 - `reconstruction.ply`: the decoded AutoDec reconstruction point cloud.
@@ -133,6 +138,7 @@ Returned keys:
 ```text
 visual/gt
 visual/sq_mesh
+visual/sq_mesh_lm  # only when records include LM meshes
 visual/reconstruction
 ```
 

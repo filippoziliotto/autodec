@@ -133,6 +133,7 @@ log_to_wandb
 mesh_resolution
 exist_threshold
 max_points
+write_lm_optimized_sq_mesh
 ```
 
 During training, `category_balanced: true` selects visualization samples from
@@ -155,6 +156,20 @@ sq_mesh.obj
 reconstruction.ply
 metadata.json
 ```
+
+During standalone `eval_test.yaml` runs, `write_lm_optimized_sq_mesh: true`
+adds `sq_mesh_lm.obj` next to the existing files for `split: test` only. The
+existing `sq_mesh.obj`, reconstruction, and metrics remain pre-LM; the LM mesh
+is a visualization-only ablation and requires CUDA unless a test optimizer is
+injected.
+
+Do not combine this with `eval.use_lm_optimization: true`. The eval entrypoint
+rejects that combination because it would make the normal forward pass use
+LM-refined SQs instead of the intended original SQ + Z path.
+
+For standalone test evaluation, `samples_per_category` is the only visualization
+sampling count. The selector uses every available test category and writes that
+many examples per category. The default in `eval_test.yaml` is `2`.
 
 For `eval_test.yaml`, the visualization output root defaults to:
 

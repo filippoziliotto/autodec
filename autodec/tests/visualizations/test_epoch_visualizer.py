@@ -86,6 +86,33 @@ def test_epoch_visualizer_writes_gt_sq_mesh_and_reconstruction(tmp_path):
     assert metadata["active_primitives"] == 1
 
 
+def test_epoch_visualizer_writes_optional_lm_sq_mesh(tmp_path):
+    from autodec.visualizations import AutoDecEpochVisualizer
+
+    visualizer = AutoDecEpochVisualizer(
+        root_dir=tmp_path,
+        run_name="debug_run",
+        mesh_resolution=6,
+        max_points=None,
+    )
+    lm_outdict = _outdict()
+    lm_outdict["trans"] = torch.tensor([[[1.0, 0.0, 0.0]]])
+
+    records = visualizer.write_epoch(
+        batch=_batch(),
+        outdict=_outdict(),
+        lm_outdict=lm_outdict,
+        epoch=3,
+        split="test",
+        num_samples=1,
+    )
+
+    record = records[0]
+    assert record.sq_mesh_path.exists()
+    assert record.sq_mesh_lm_path.exists()
+    assert record.sq_mesh_lm_path.name == "sq_mesh_lm.obj"
+
+
 def test_build_wandb_log_returns_expected_visual_keys(tmp_path):
     from autodec.visualizations import AutoDecEpochVisualizer, build_wandb_log
 

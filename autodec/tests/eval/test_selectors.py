@@ -14,7 +14,7 @@ class FakeShapeNet:
                 )
 
 
-def test_category_balanced_indices_returns_twenty_samples_from_five_categories():
+def test_category_balanced_indices_returns_two_samples_from_every_category_by_default():
     from autodec.eval.selectors import select_category_balanced_indices
 
     dataset = FakeShapeNet(
@@ -28,40 +28,30 @@ def test_category_balanced_indices_returns_twenty_samples_from_five_categories()
         }
     )
 
-    selection = select_category_balanced_indices(
-        dataset,
-        num_samples=20,
-        min_categories=5,
-        samples_per_category=4,
-    )
+    selection = select_category_balanced_indices(dataset)
 
-    assert len(selection) == 20
+    assert len(selection) == 12
     assert sorted({item.category for item in selection}) == [
         "02691156",
         "02958343",
         "03001627",
         "04256520",
         "04379243",
+        "04530566",
     ]
     counts = {category: 0 for category in {item.category for item in selection}}
     for item in selection:
         counts[item.category] += 1
-    assert set(counts.values()) == {4}
+    assert set(counts.values()) == {2}
     assert [item.dataset_index for item in selection] == sorted(
         item.dataset_index for item in selection
     )
 
 
-def test_category_balanced_indices_fails_when_too_few_categories_exist():
+def test_category_balanced_indices_fails_when_any_category_has_too_few_samples():
     from autodec.eval.selectors import select_category_balanced_indices
 
-    dataset = FakeShapeNet({"02691156": 10, "03001627": 10})
+    dataset = FakeShapeNet({"02691156": 1, "03001627": 2})
 
-    with pytest.raises(ValueError, match="at least 5 categories"):
-        select_category_balanced_indices(
-            dataset,
-            num_samples=20,
-            min_categories=5,
-            samples_per_category=4,
-        )
-
+    with pytest.raises(ValueError, match="Category 02691156 has 1 test samples, need 2"):
+        select_category_balanced_indices(dataset)

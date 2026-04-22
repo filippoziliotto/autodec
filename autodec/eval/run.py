@@ -58,6 +58,16 @@ def maybe_enable_lm_optimization(model, cfg, device):
     eval_cfg = cfg_get(cfg, "eval")
     if not cfg_get(eval_cfg, "use_lm_optimization", False):
         return False
+    vis_cfg = cfg_get(cfg, "visualization")
+    if (
+        cfg_get(eval_cfg, "split", "test") == "test"
+        and cfg_get(vis_cfg, "write_lm_optimized_sq_mesh", False)
+    ):
+        raise ValueError(
+            "eval.use_lm_optimization and visualization.write_lm_optimized_sq_mesh "
+            "are mutually exclusive. Keep eval.use_lm_optimization=false to run "
+            "the normal original SQ + Z forward pass and write a separate LM SQ mesh."
+        )
     if device.type != "cuda":
         raise RuntimeError(
             "eval.use_lm_optimization requires CUDA because SuperDec LMOptimizer "

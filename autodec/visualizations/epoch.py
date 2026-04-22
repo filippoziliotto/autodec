@@ -22,6 +22,7 @@ class VisualizationRecord:
     sq_mesh_path: Path
     reconstruction_path: Path
     metadata_path: Path
+    sq_mesh_lm_path: Path | None = None
 
 
 class AutoDecEpochVisualizer:
@@ -92,7 +93,15 @@ class AutoDecEpochVisualizer:
         path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         return path
 
-    def write_epoch(self, batch, outdict, epoch, split="val", num_samples=1):
+    def write_epoch(
+        self,
+        batch,
+        outdict,
+        epoch,
+        split="val",
+        num_samples=1,
+        lm_outdict=None,
+    ):
         """Write input, SQ mesh, reconstruction, and metadata for epoch samples."""
 
         points = batch["points"]
@@ -107,6 +116,9 @@ class AutoDecEpochVisualizer:
 
             input_path = sample_dir / "input_gt.ply"
             sq_mesh_path = sample_dir / "sq_mesh.obj"
+            sq_mesh_lm_path = (
+                sample_dir / "sq_mesh_lm.obj" if lm_outdict is not None else None
+            )
             reconstruction_path = sample_dir / "reconstruction.ply"
             metadata_path = sample_dir / "metadata.json"
 
@@ -124,6 +136,14 @@ class AutoDecEpochVisualizer:
                 resolution=self.mesh_resolution,
                 exist_threshold=self.exist_threshold,
             )
+            if lm_outdict is not None:
+                export_sq_mesh(
+                    sq_mesh_lm_path,
+                    lm_outdict,
+                    sample_index=sample_index,
+                    resolution=self.mesh_resolution,
+                    exist_threshold=self.exist_threshold,
+                )
             write_point_cloud_ply(
                 reconstruction_path,
                 reconstruction_points,
@@ -148,6 +168,7 @@ class AutoDecEpochVisualizer:
                     sq_mesh_path=sq_mesh_path,
                     reconstruction_path=reconstruction_path,
                     metadata_path=metadata_path,
+                    sq_mesh_lm_path=sq_mesh_lm_path,
                 )
             )
         return records
@@ -165,13 +186,21 @@ def build_wandb_log(records, object3d_factory=None, prefix="visual"):
     """Build a WandB payload from local visualization records without logging it."""
 
     object3d_factory = object3d_factory or _default_object3d_factory
-    return {
+    payload = {
         f"{prefix}/gt": [object3d_factory(record.input_path) for record in records],
         f"{prefix}/sq_mesh": [object3d_factory(record.sq_mesh_path) for record in records],
         f"{prefix}/reconstruction": [
             object3d_factory(record.reconstruction_path) for record in records
         ],
     }
+    lm_paths = [
+        record.sq_mesh_lm_path
+        for record in records
+        if record.sq_mesh_lm_path is not None
+    ]
+    if lm_paths:
+        payload[f"{prefix}/sq_mesh_lm"] = [object3d_factory(path) for path in lm_paths]
+    return payload
 
 
 def log_wandb_visualizations(wandb_run, records, step=None, prefix="visual"):

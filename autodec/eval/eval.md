@@ -32,9 +32,24 @@ running evaluation. This is off by default and should be reported separately
 from the main AutoDec result because the decoder receives refined SQ parameters
 with the original residual latent. The current LM implementation requires CUDA.
 
+For qualitative test-set outputs, `visualization.write_lm_optimized_sq_mesh`
+can write an additional `sq_mesh_lm.obj` per selected sample. This path keeps
+the normal evaluation behavior intact: `sq_mesh.obj`, reconstruction points,
+and metrics are produced from the unrefined model output, while only the extra
+mesh is generated from a cloned LM-refined SQ outdict. The option is ignored
+outside `split: test`.
+
+The two LM modes are mutually exclusive. Use
+`eval.use_lm_optimization: false` with
+`visualization.write_lm_optimized_sq_mesh: true` when you want the normal
+forward pass to remain `original SQ + Z -> reconstruction` and only add a
+separate `original SQ + LM` mesh. Set `eval.use_lm_optimization: true` only for
+a separate full-forward LM ablation.
+
 `selectors.py` contains deterministic ShapeNet sample selection. It reads
-`dataset.models`, groups entries by category, requires the configured minimum
-number of categories, and returns fixed dataset indices for visualization.
+`dataset.models`, groups entries by category, and returns
+`visualization.samples_per_category` fixed dataset indices from every available
+test category. The default is two examples per category.
 
 `metrics.py` contains the evaluation-only metrics. `paper_chamfer_metrics`
 computes symmetric Chamfer-L1, symmetric Chamfer-L2, their x100 table-reporting

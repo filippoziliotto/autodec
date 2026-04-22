@@ -2,8 +2,9 @@
 
 Tests for the standalone AutoDec test-evaluation path.
 
-`test_selectors.py` checks deterministic category-balanced sample selection from
-ShapeNet-style `dataset.models` metadata.
+`test_selectors.py` checks deterministic sample selection from ShapeNet-style
+`dataset.models` metadata, using every category and a fixed number of examples
+per category.
 
 `test_eval_metrics.py` checks paper-style Chamfer, x100-scaled Chamfer,
 F-score metric names, configurable F-score thresholds, and metric averaging.

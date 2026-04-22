@@ -99,13 +99,12 @@ eval:
 visualization:
   enabled: true
   output_dir: data/eval
-  num_samples: 20
-  min_categories: 5
-  samples_per_category: 4
+  samples_per_category: 5
   log_to_wandb: false
   mesh_resolution: 24
   exist_threshold: 0.5
   max_points: 4096
+  write_lm_optimized_sq_mesh: true
 
 loss:
   type: autodec
