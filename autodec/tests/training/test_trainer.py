@@ -25,6 +25,23 @@ class TinyLoss(nn.Module):
         return loss, {"all": loss.detach().item()}
 
 
+class ScriptedValidationLoss(nn.Module):
+    def __init__(self, val_metrics):
+        super().__init__()
+        self.val_metrics = list(val_metrics)
+        self.val_index = 0
+
+    def forward(self, batch, outdict):
+        if torch.is_grad_enabled():
+            loss = outdict["decoded_points"].sum() * 0.0
+            return loss, {"all": 0.0}
+
+        metrics = self.val_metrics[self.val_index]
+        self.val_index += 1
+        loss = outdict["decoded_points"].new_tensor(float(metrics["all"]))
+        return loss, metrics
+
+
 class ConsistencyLoss(nn.Module):
     lambda_cons = 1.0
 
@@ -185,6 +202,50 @@ def test_autodec_trainer_writes_epoch_metrics_after_train_and_eval(tmp_path):
     assert row["evaluated"] is True
     assert row["val_loss"] == row["val"]["all"]
     assert row["lr"] == [0.01]
+
+
+def test_autodec_trainer_saves_best_checkpoint_with_recon_and_scaffold_guard(tmp_path):
+    from autodec.training.trainer import AutoDecTrainer
+
+    dataloaders = {
+        "train": [{"points": torch.ones(2, 3, 3)}],
+        "val": [{"points": torch.ones(2, 3, 3)}],
+    }
+    model = TinyModel()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    loss_fn = ScriptedValidationLoss(
+        [
+            {"all": 10.0, "recon": 10.0, "scaffold_chamfer": 100.0},
+            {"all": 9.0, "recon": 9.0, "scaffold_chamfer": 104.0},
+            {"all": 8.0, "recon": 8.0, "scaffold_chamfer": 106.0},
+            {"all": 8.5, "recon": 8.5, "scaffold_chamfer": 99.0},
+        ]
+    )
+    trainer = AutoDecTrainer(
+        model=model,
+        optimizer=optimizer,
+        scheduler=None,
+        dataloaders=dataloaders,
+        loss_fn=loss_fn,
+        ctx=SimpleNamespace(
+            num_epochs=4,
+            save_path=str(tmp_path),
+            save_every_n_epochs=100,
+            evaluate_every_n_epochs=1,
+            save_best=True,
+            best_filename="best.pt",
+            best_recon_metric="recon",
+            best_scaffold_metric="scaffold_chamfer",
+            best_scaffold_tolerance=0.05,
+        ),
+        device=torch.device("cpu"),
+    )
+
+    trainer.train()
+
+    checkpoint = torch.load(tmp_path / "best.pt", map_location="cpu", weights_only=False)
+    assert checkpoint["epoch"] == 3
+    assert checkpoint["val_loss"] == 8.5
 
 
 def test_autodec_trainer_logs_train_metrics_when_epoch_is_not_evaluated(tmp_path):

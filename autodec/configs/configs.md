@@ -290,6 +290,11 @@ save_path
 log_metrics_to_file
 metrics_log_filename
 save_every_n_epochs
+save_best
+best_filename
+best_recon_metric
+best_scaffold_metric
+best_scaffold_tolerance
 evaluate_every_n_epochs
 num_epochs
 batch_size
@@ -302,6 +307,11 @@ new_camera_sample
 
 `save_path` is combined with `run_name` by `autodec.training.train`, so local
 metrics and checkpoints are written under `save_path/run_name/`.
+
+For phase 2, `save_best: true` writes `best.pt` by default. Selection prefers
+lower validation `recon`, but only among checkpoints whose
+`scaffold_chamfer` is no worse than its running minimum by more than
+`best_scaffold_tolerance` (`0.05` by default).
 
 ### `optimizer`
 

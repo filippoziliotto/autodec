@@ -108,12 +108,21 @@ class AutoDecTrainer:
             if visualize_samples_per_category is not None
             else getattr(ctx, "visualize_samples_per_category", 1)
         )
+        self.save_best = bool(getattr(ctx, "save_best", False))
+        self.best_filename = getattr(ctx, "best_filename", "best.pt")
+        self.best_recon_metric = getattr(ctx, "best_recon_metric", "recon")
+        self.best_scaffold_metric = getattr(
+            ctx,
+            "best_scaffold_metric",
+            "scaffold_chamfer",
+        )
+        self.best_scaffold_tolerance = float(getattr(ctx, "best_scaffold_tolerance", 0.05))
+        self.best_recon = float("inf")
+        self.best_scaffold = float("inf")
 
-    def save_checkpoint(self, epoch, val_loss):
+    def _save_checkpoint(self, epoch, val_loss, path):
         if not is_main_process() or self.save_path is None:
             return None
-        filename = f"epoch_{epoch + 1}.pt"
-        path = Path(self.save_path) / filename
         return save_autodec_checkpoint(
             self.model,
             self.optimizer,
@@ -122,6 +131,53 @@ class AutoDecTrainer:
             val_loss,
             path,
         )
+
+    def save_checkpoint(self, epoch, val_loss):
+        if not is_main_process() or self.save_path is None:
+            return None
+        filename = f"epoch_{epoch + 1}.pt"
+        path = Path(self.save_path) / filename
+        return self._save_checkpoint(epoch, val_loss, path)
+
+    def save_best_checkpoint(self, epoch, val_loss):
+        if not is_main_process() or self.save_path is None:
+            return None
+        path = Path(self.save_path) / self.best_filename
+        return self._save_checkpoint(epoch, val_loss, path)
+
+    def _metric_value(self, metrics, name, default=None):
+        if metrics is None or name is None:
+            return default
+        value = metrics.get(name, default)
+        if value is None:
+            return default
+        return float(value)
+
+    def _should_save_best_checkpoint(self, val_metrics, val_loss):
+        recon = self._metric_value(val_metrics, self.best_recon_metric, val_loss)
+        if recon is None:
+            return False, val_loss
+
+        scaffold = self._metric_value(val_metrics, self.best_scaffold_metric)
+        if scaffold is not None:
+            self.best_scaffold = min(self.best_scaffold, scaffold)
+            scaffold_limit = self.best_scaffold * (1.0 + self.best_scaffold_tolerance)
+            if scaffold > scaffold_limit:
+                return False, recon
+
+        if recon >= self.best_recon:
+            return False, recon
+
+        self.best_recon = recon
+        return True, recon
+
+    def _maybe_save_best_checkpoint(self, epoch, val_metrics, val_loss):
+        if not self.save_best:
+            return None
+        should_save, best_val_loss = self._should_save_best_checkpoint(val_metrics, val_loss)
+        if not should_save:
+            return None
+        return self.save_best_checkpoint(epoch, best_val_loss)
 
     def _run_loader(self, loader, training, epoch):
         self.model.train(training)
@@ -324,6 +380,7 @@ class AutoDecTrainer:
             if do_eval:
                 val_metrics = self.evaluate(epoch)
                 val_loss = val_metrics.get("all", val_metrics.get("recon", 0.0))
+                self._maybe_save_best_checkpoint(epoch, val_metrics, val_loss)
             self._log_epoch_metrics(
                 epoch,
                 train_metrics,

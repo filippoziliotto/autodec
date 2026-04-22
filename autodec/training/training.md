@@ -433,6 +433,12 @@ epoch_{epoch + 1}.pt
 
 inside `ctx.save_path`.
 
+When `ctx.save_best` is true, the trainer also writes `ctx.best_filename`
+(`best.pt` by default) after validation. The default phase-2 policy selects a
+lower `recon` checkpoint only if its `scaffold_chamfer` is within
+`1 + ctx.best_scaffold_tolerance` of the running minimum scaffold Chamfer, so
+the dense reconstruction cannot improve by silently degrading the SQ scaffold.
+
 ## `train.py`
 
 Hydra entrypoint for AutoDec training.

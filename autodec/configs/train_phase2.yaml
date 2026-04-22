@@ -98,6 +98,11 @@ trainer:
   log_metrics_to_file: true
   metrics_log_filename: metrics.jsonl
   save_every_n_epochs: 50
+  save_best: true
+  best_filename: best.pt
+  best_recon_metric: recon
+  best_scaffold_metric: scaffold_chamfer
+  best_scaffold_tolerance: 0.05
   evaluate_every_n_epochs: 1
   num_epochs: 200
   batch_size: 2
