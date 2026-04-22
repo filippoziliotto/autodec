@@ -30,27 +30,43 @@ def _resample_points(points, target_count):
     return points.repeat((repeats, 1))[:target_count]
 
 
-def prune_decoded_points(outdict, exist_threshold=0.5, target_count=None):
-    """Return decoded points from active primitives only.
+def prune_points_by_active_primitives(
+    outdict,
+    points_key,
+    exist_threshold=0.5,
+    target_count=None,
+):
+    """Return points from active primitives only.
 
     Without `target_count`, this returns a list of variable-length point clouds.
     With `target_count`, it returns a dense tensor `[B, target_count, 3]` by
     deterministically downsampling or repeating the pruned points.
     """
 
-    decoded_points = outdict["decoded_points"]
-    part_ids = outdict["part_ids"].to(device=decoded_points.device)
-    exist = _exist_probability(outdict).to(device=decoded_points.device)
+    points_by_part = outdict[points_key]
+    part_ids = outdict["part_ids"].to(device=points_by_part.device)
+    exist = _exist_probability(outdict).to(device=points_by_part.device)
 
     pruned = []
-    for batch_idx in range(decoded_points.shape[0]):
+    for batch_idx in range(points_by_part.shape[0]):
         active = exist[batch_idx] > exist_threshold
         if not active.any():
             active[exist[batch_idx].argmax()] = True
         point_mask = active[part_ids]
-        points = decoded_points[batch_idx, point_mask]
+        points = points_by_part[batch_idx, point_mask]
         pruned.append(_resample_points(points, target_count))
 
     if target_count is None:
         return pruned
     return torch.stack(pruned, dim=0)
+
+
+def prune_decoded_points(outdict, exist_threshold=0.5, target_count=None):
+    """Return decoded points from active primitives only."""
+
+    return prune_points_by_active_primitives(
+        outdict,
+        "decoded_points",
+        exist_threshold=exist_threshold,
+        target_count=target_count,
+    )

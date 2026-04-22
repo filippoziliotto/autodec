@@ -14,7 +14,7 @@ from autodec.training.trainer import (
     model_forward,
     move_batch_to_device,
 )
-from autodec.utils.inference import prune_decoded_points
+from autodec.utils.inference import prune_points_by_active_primitives
 from autodec.visualizations import build_wandb_log
 
 
@@ -132,12 +132,32 @@ class AutoDecEvaluator:
         if not cfg_get(eval_cfg, "prune_decoded_points", False):
             return outdict
         result = dict(outdict)
-        result["decoded_points"] = prune_decoded_points(
+        result["decoded_points"] = prune_points_by_active_primitives(
             outdict,
+            "decoded_points",
             exist_threshold=cfg_get(eval_cfg, "prune_exist_threshold", 0.5),
             target_count=self._prune_target_count(eval_cfg, batch),
         )
         return result
+
+    def _paper_points(self, outdict, points_key, batch):
+        eval_cfg = cfg_get(self.cfg, "eval")
+        if not cfg_get(eval_cfg, "prune_decoded_points", False):
+            return outdict[points_key]
+        return prune_points_by_active_primitives(
+            outdict,
+            points_key,
+            exist_threshold=cfg_get(eval_cfg, "prune_exist_threshold", 0.5),
+            target_count=self._prune_target_count(eval_cfg, batch),
+        )
+
+    @staticmethod
+    def _legacy_full_paper_aliases(metrics):
+        return {
+            key.replace("paper_full_", "paper_", 1): value
+            for key, value in metrics.items()
+            if key.startswith("paper_full_")
+        }
 
     def _model_encoder(self):
         model = getattr(self.model, "module", self.model)
@@ -208,12 +228,23 @@ class AutoDecEvaluator:
 
             paper_metrics = {}
             if compute_paper:
-                paper_outdict = self._maybe_prune_outdict(outdict, batch)
-                paper_metrics = paper_chamfer_metrics(
-                    paper_outdict["decoded_points"],
+                full_metrics = paper_chamfer_metrics(
+                    self._paper_points(outdict, "decoded_points", batch),
                     batch["points"],
                     f_score_threshold=f_score_threshold,
+                    prefix="paper_full",
                 )
+                paper_metrics.update(self._legacy_full_paper_aliases(full_metrics))
+                paper_metrics.update(full_metrics)
+                if "surface_points" in outdict:
+                    paper_metrics.update(
+                        paper_chamfer_metrics(
+                            self._paper_points(outdict, "surface_points", batch),
+                            batch["points"],
+                            f_score_threshold=f_score_threshold,
+                            prefix="paper_sq",
+                        )
+                    )
                 averager.update(paper_metrics, batch_size=batch_size)
 
             row_metrics = self._row_metrics(loss_metrics, paper_metrics)

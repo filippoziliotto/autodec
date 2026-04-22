@@ -17,9 +17,10 @@ cloud metrics, writes `metrics.json`, writes `per_sample_metrics.jsonl`, and
 produces category-balanced 3D visualization artifacts.
 
 When `eval.prune_decoded_points` is true, paper-style point-cloud metrics and
-test visualizations use decoded points pruned by primitive existence. Training
-loss metrics still use the raw fixed-size decoded tensor so they stay aligned
-with the training objective.
+test visualizations use points pruned by primitive existence. For paper metrics,
+the evaluator applies the same active-primitive pruning to both
+`decoded_points` and `surface_points`. Training loss metrics still use the raw
+fixed-size tensors so they stay aligned with the training objective.
 
 If loss metrics are enabled and `lambda_cons > 0`, `evaluator.py` requests
 `return_consistency=True` from the model. This computes the no-residual decoder
@@ -55,5 +56,17 @@ test category. The default is two examples per category.
 `metrics.py` contains the evaluation-only metrics. `paper_chamfer_metrics`
 computes symmetric Chamfer-L1, symmetric Chamfer-L2, their x100 table-reporting
 variants, and precision/recall/F-score at the configured threshold
-`eval.f_score_threshold` (default `0.01`). `MetricAverager` accumulates
-weighted means for metric dictionaries whose keys may differ between updates.
+`eval.f_score_threshold` (default `0.01`). The evaluator reports these metrics
+for two AutoDec outputs:
+
+```text
+paper_full_*  decoded_points, i.e. SQ surface plus learned offsets
+paper_sq_*    surface_points, i.e. SQ-only scaffold
+paper_*       backward-compatible alias for paper_full_*
+```
+
+Use `paper_sq_chamfer_l1_x100` and `paper_sq_chamfer_l2_x100` for the
+SuperDec-paper-style SQ-only comparison. Use `paper_full_*` for AutoDec's full
+3D reconstruction. `scaffold_chamfer` is a weighted training diagnostic and is
+not the paper metric. `MetricAverager` accumulates weighted means for metric
+dictionaries whose keys may differ between updates.

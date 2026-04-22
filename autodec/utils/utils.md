@@ -141,16 +141,19 @@ Handles DDP-wrapped models by saving `model.module.state_dict()`.
 Defines:
 
 ```text
+prune_points_by_active_primitives
 prune_decoded_points
 ```
 
 Purpose:
 
-Inference/evaluation post-processing for fixed-size decoded point clouds. It
-uses primitive existence probabilities and `part_ids` to keep decoded points
-from active primitives only. If `target_count` is provided, it deterministically
-downsamples or repeats the pruned points so metrics can still consume a dense
-`[B, target_count, 3]` tensor.
+Inference/evaluation post-processing for fixed-size primitive-sampled point
+clouds. It uses primitive existence probabilities and `part_ids` to keep points
+from active primitives only. `prune_decoded_points` is the decoded-output
+wrapper; `prune_points_by_active_primitives` can apply the same logic to
+`surface_points` for SQ-only paper metrics. If `target_count` is provided, it
+deterministically downsamples or repeats the pruned points so metrics can still
+consume a dense `[B, target_count, 3]` tensor.
 
 ## `metrics.py`
 

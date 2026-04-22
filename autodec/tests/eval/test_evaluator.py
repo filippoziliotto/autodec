@@ -76,7 +76,7 @@ class PrunableEvalModel(nn.Module):
         return {
             "decoded_points": torch.stack([active, inactive], dim=1),
             "decoded_weights": torch.ones(batch_size, 2, dtype=points.dtype, device=points.device),
-            "surface_points": points[:, :2],
+            "surface_points": torch.stack([active, inactive], dim=1),
             "part_ids": torch.tensor([0, 1], device=points.device),
             "scale": torch.ones(batch_size, 2, 3, dtype=points.dtype, device=points.device),
             "shape": torch.ones(batch_size, 2, 2, dtype=points.dtype, device=points.device),
@@ -247,6 +247,10 @@ def test_evaluator_writes_metrics_and_two_visualizations_per_category(tmp_path):
     assert result["num_visualizations"] == 10
     assert result["visualized_categories"] == ["a", "b", "c", "d", "e"]
     assert "paper_chamfer_l1" in result["metrics"]
+    assert "paper_full_chamfer_l1" in result["metrics"]
+    assert "paper_sq_chamfer_l1" in result["metrics"]
+    assert result["metrics"]["paper_chamfer_l1"] == result["metrics"]["paper_full_chamfer_l1"]
+    assert result["metrics"]["paper_sq_chamfer_l1"] == 0.0
     assert "paper_f_score_tau_0_01" in result["metrics"]
     assert "recon" in result["metrics"]
 
@@ -298,6 +302,28 @@ def test_evaluator_computes_paper_metrics_on_pruned_decoded_points(tmp_path):
 
     assert result["metrics"]["paper_chamfer_l1"] == 0.0
     assert result["metrics"]["paper_chamfer_l2"] == 0.0
+
+
+def test_evaluator_computes_sq_paper_metrics_on_pruned_surface_points(tmp_path):
+    from autodec.eval.evaluator import AutoDecEvaluator
+
+    cfg = _cfg(tmp_path)
+    cfg.eval.compute_loss_metrics = False
+    cfg.eval.prune_decoded_points = True
+    cfg.eval.prune_target_count = 1
+    cfg.visualization.enabled = False
+    evaluator = AutoDecEvaluator(
+        cfg=cfg,
+        model=PrunableEvalModel(),
+        loss_fn=TinyLoss(),
+        dataset=TinyEvalDataset(),
+        visualizer=None,
+    )
+
+    result = evaluator.evaluate()
+
+    assert result["metrics"]["paper_sq_chamfer_l1"] == 0.0
+    assert result["metrics"]["paper_sq_chamfer_l2"] == 0.0
 
 
 def test_evaluator_requests_consistency_pass_when_loss_needs_it(tmp_path):

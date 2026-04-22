@@ -54,6 +54,25 @@ def test_paper_chamfer_metrics_accept_custom_fscore_threshold():
     assert loose["paper_f_score_tau_0_03"] == torch.tensor(1.0)
 
 
+def test_paper_chamfer_metrics_accept_metric_prefix():
+    from autodec.eval.metrics import paper_chamfer_metrics
+
+    pred = torch.tensor([[[0.0, 0.0, 0.0]]])
+    target = torch.tensor([[[0.0, 0.0, 0.0]]])
+
+    metrics = paper_chamfer_metrics(pred, target, prefix="paper_sq")
+
+    assert set(metrics) == {
+        "paper_sq_chamfer_l1",
+        "paper_sq_chamfer_l2",
+        "paper_sq_chamfer_l1_x100",
+        "paper_sq_chamfer_l2_x100",
+        "paper_sq_precision_tau_0_01",
+        "paper_sq_recall_tau_0_01",
+        "paper_sq_f_score_tau_0_01",
+    }
+
+
 def test_metric_averager_keeps_stable_float_keys():
     from autodec.eval.metrics import MetricAverager
 

@@ -403,7 +403,9 @@ data/eval/<run_name>/per_sample_metrics.jsonl
 `compute_loss_metrics` enables the same scalar loss metrics used in training.
 `compute_paper_metrics` enables symmetric Chamfer-L1, symmetric Chamfer-L2,
 x100-scaled Chamfer values, and F-score metrics for paper-style reporting.
-`f_score_threshold` defaults to `0.01`.
+Metrics are emitted as `paper_full_*` for `decoded_points`, `paper_sq_*` for
+the SQ-only `surface_points`, and legacy `paper_*` aliases for
+`paper_full_*`. `f_score_threshold` defaults to `0.01`.
 
 `use_lm_optimization` defaults to `false`. When true, standalone test
 evaluation enables SuperDec's LM refinement inside `AutoDecEncoder` before the

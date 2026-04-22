@@ -12,7 +12,13 @@ def _threshold_key(value):
     return text
 
 
-def paper_chamfer_metrics(pred, target, f_score_threshold=0.01, eps=1e-8):
+def paper_chamfer_metrics(
+    pred,
+    target,
+    f_score_threshold=0.01,
+    eps=1e-8,
+    prefix="paper",
+):
     """Return paper-style point-cloud reconstruction metrics.
 
     Chamfer-L1 uses Euclidean nearest-neighbor distances. Chamfer-L2 uses the
@@ -44,13 +50,13 @@ def paper_chamfer_metrics(pred, target, f_score_threshold=0.01, eps=1e-8):
     f_score = 2.0 * precision * recall / (precision + recall).clamp_min(eps)
     threshold_key = _threshold_key(f_score_threshold)
     return {
-        "paper_chamfer_l1": chamfer_l1,
-        "paper_chamfer_l2": chamfer_l2,
-        "paper_chamfer_l1_x100": chamfer_l1 * 100.0,
-        "paper_chamfer_l2_x100": chamfer_l2 * 100.0,
-        f"paper_precision_tau_{threshold_key}": precision,
-        f"paper_recall_tau_{threshold_key}": recall,
-        f"paper_f_score_tau_{threshold_key}": f_score,
+        f"{prefix}_chamfer_l1": chamfer_l1,
+        f"{prefix}_chamfer_l2": chamfer_l2,
+        f"{prefix}_chamfer_l1_x100": chamfer_l1 * 100.0,
+        f"{prefix}_chamfer_l2_x100": chamfer_l2 * 100.0,
+        f"{prefix}_precision_tau_{threshold_key}": precision,
+        f"{prefix}_recall_tau_{threshold_key}": recall,
+        f"{prefix}_f_score_tau_{threshold_key}": f_score,
     }
 
 

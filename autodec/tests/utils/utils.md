@@ -68,6 +68,7 @@ Tests:
 
 ```text
 autodec.utils.inference.prune_decoded_points
+autodec.utils.inference.prune_points_by_active_primitives
 ```
 
 Checks:
@@ -76,6 +77,7 @@ Checks:
 inactive primitive decoded points are removed
 fixed-count resampling is deterministic
 if no primitive is active, the highest-existence primitive is kept
+the generic helper can prune `surface_points` for SQ-only evaluation metrics
 ```
 
 ## `test_metrics.py`
