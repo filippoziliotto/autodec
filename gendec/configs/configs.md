@@ -44,6 +44,17 @@ When any config file changes, this file must be updated to reflect the new purpo
 - `training.best_checkpoint_path`: checkpoint to restore.
 - `sampling`: output count, integration steps, existence threshold, and sample output path.
 
+### `preview_video.yaml`
+
+- Utility preset for turning training preview checkpoints into per-sample videos.
+- `preview_video.preview_dir`: folder containing `epoch_XXXX_preview.pt` artifacts.
+- `preview_video.run_name`: output subfolder name under `gendec/videos/`.
+- `preview_video.output_root`: video root directory.
+- `preview_video.every_n_epochs`: frame stride over saved preview epochs.
+- `preview_video.fps`: output video frame rate.
+- `preview_video.sample_index`: starting sampled object index inside each preview artifact to render.
+- `preview_video.num_videos`: how many per-sample MP4 files to create, named `video_000000.mp4`, `video_000001.mp4`, and so on.
+
 ### `smoke.yaml`
 
 - End-to-end smoke preset used for toy export, training, and sampling verification.

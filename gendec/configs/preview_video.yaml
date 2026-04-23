@@ -1,0 +1,8 @@
+preview_video:
+  preview_dir: gendec/data/previews
+  run_name: gendec_phase1
+  output_root: gendec/videos
+  every_n_epochs: 10
+  fps: 4
+  sample_index: 0
+  num_videos: 10

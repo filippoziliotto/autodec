@@ -52,6 +52,12 @@ If a new top-level test file is added here, or an existing test changes scope, t
 - `test_deterministic_sort_indices_follow_priority_rules`: verifies the deterministic ordering priority.
 - `test_reorder_teacher_outputs_reorders_assignments_and_tokens_together`: verifies aligned reordering across teacher payload tensors.
 
+### `test_preview_video.py`
+
+- `_write_preview(path, points_scale)`: writes a minimal preview artifact for video tests.
+- `test_collect_preview_epochs_selects_every_10`: verifies preview discovery keeps only the configured epoch stride.
+- `test_build_preview_video_writes_video_under_run_name`: verifies the utility writes an MP4 to `gendec/videos/<run_name>/`.
+
 ### `test_rotation.py`
 
 - `test_matrix_to_rot6d_uses_first_two_columns`: verifies the teacher-side 6D rotation conversion convention.

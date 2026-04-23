@@ -11,6 +11,7 @@
 - shell scripts for export, training, validation evaluation, and test evaluation
 - optional eval-only coarse decoding of sampled scaffolds through a frozen AutoDec decoder with zero residual latents
 - generated-SQ visualization exports for test evaluation under `data/viz/`
+- preview-video rendering under `gendec/videos/<run_name>/video_000000.mp4`, `video_000001.mp4`, and related per-sample outputs
 - package-level documentation and tests
 
 ## Maintenance Contract
@@ -38,6 +39,7 @@ When code or configs in a documented folder change, the matching folder markdown
 - `to_namespace(value)`: recursively converts dict/list config trees into `SimpleNamespace` objects.
 - `load_yaml_config(path)`: loads YAML and returns namespace-style access.
 - `fallback_cli_config(default_config_name)`: CLI fallback for environments without Hydra.
+- `explicit_config_argument(default_config_name)`: lets entrypoints accept `--config path.yaml` even when Hydra is installed.
 
 ### `export_teacher.py`
 

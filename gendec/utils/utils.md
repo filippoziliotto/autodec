@@ -13,7 +13,7 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
 ### `__init__.py`
 
 - Re-export surface for the utils package.
-- Exposes `TrainingConsoleLogger`.
+- Exposes `TrainingConsoleLogger`, `GeneratedSQVisualizer`, and preview-video helpers.
 
 ### `logger.py`
 
@@ -36,3 +36,14 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
   - `_export_sq_mesh(path, processed, sample_index)`: writes the generated active SQ scaffold mesh as OBJ plus MTL.
   - `write_generated(processed, split="test", num_samples=10)`: writes `sq_mesh.obj`, `preview_points.ply`, and `metadata.json` for generated samples.
 - `write_point_cloud_ply(path, points, color=(210, 210, 210), max_points=None)`: writes a preview point cloud PLY file.
+
+### `preview_video.py`
+
+- Utility for turning saved training preview artifacts into a rendered video.
+- `_epoch_from_path(path)`: extracts the epoch number from `epoch_XXXX_preview.pt`.
+- `collect_preview_epochs(preview_dir, every_n_epochs=10)`: finds preview files and keeps only epochs that match the configured stride.
+- `_points_from_preview(path, sample_index=0)`: loads one preview artifact and extracts one generated preview point cloud.
+- `_frame_from_points(points, epoch, image_size=(640, 640))`: renders one 3D scatter frame with matplotlib.
+- `_build_single_preview_video(preview_dir, video_path, selected, fps=4, sample_index=0)`: writes one MP4 for one chosen sample index across the selected preview epochs.
+- `build_preview_video(preview_dir, run_name, output_root="gendec/videos", every_n_epochs=10, fps=4, sample_index=0, num_videos=10)`: writes `num_videos` MP4 files under `gendec/videos/<run_name>/`, named `video_000000.mp4`, `video_000001.mp4`, and so on. Each video tracks a different sampled object index across the selected preview epochs.
+- `_run_from_cfg(cfg)`: CLI entrypoint for running the preview-video utility from YAML config.
