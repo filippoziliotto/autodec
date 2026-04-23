@@ -31,6 +31,7 @@ MAX_SHAPE_EXPONENT = 2.0
 class GeneratedSQVisualizationRecord:
     split: str
     sample_index: int
+    category_label: str | None
     sample_dir: Path
     sq_mesh_path: Path
     preview_points_path: Path
@@ -168,16 +169,21 @@ class GeneratedSQVisualizer:
         self.exist_threshold = float(exist_threshold)
         self.max_preview_points = int(max_preview_points)
 
-    def _sample_dir(self, split, sample_index):
-        return self.root_dir / self.run_name / split / f"generated_{sample_index:04d}"
+    def _sample_dir(self, split, sample_index, category_label=None):
+        root = self.root_dir / self.run_name / split
+        if category_label is not None:
+            root = root / str(category_label)
+        return root / f"generated_{sample_index:04d}"
 
-    def _write_metadata(self, path, split, sample_index, preview_points, active_primitives, decoded_points=None):
+    def _write_metadata(self, path, split, sample_index, preview_points, active_primitives, decoded_points=None, category_label=None):
         payload = {
             "split": split,
             "sample_index": int(sample_index),
             "preview_points": int(preview_points),
             "active_primitives": int(active_primitives),
         }
+        if category_label is not None:
+            payload["category_id"] = str(category_label)
         if decoded_points is not None:
             payload["decoded_points"] = int(decoded_points)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -222,13 +228,17 @@ class GeneratedSQVisualizer:
         _write_mesh_obj(path, vertices, mesh_faces, face_colors)
         return path
 
-    def write_generated(self, processed, split="test", num_samples=10, decoded_points=None):
+    def write_generated(self, processed, split="test", num_samples=10, decoded_points=None, category_labels=None):
         batch_size = int(processed["tokens"].shape[0])
         num_samples = min(int(num_samples), batch_size)
         records = []
+        category_counts = {}
 
         for sample_index in range(num_samples):
-            sample_dir = self._sample_dir(split, sample_index)
+            category_label = None if category_labels is None else str(category_labels[sample_index])
+            local_index = category_counts.get(category_label, 0)
+            category_counts[category_label] = local_index + 1
+            sample_dir = self._sample_dir(split, local_index, category_label=category_label)
             sample_dir.mkdir(parents=True, exist_ok=True)
 
             sq_mesh_path = sample_dir / "sq_mesh.obj"
@@ -262,15 +272,17 @@ class GeneratedSQVisualizer:
             self._write_metadata(
                 metadata_path,
                 split,
-                sample_index,
+                local_index,
                 preview_points.shape[0],
                 int(_to_numpy(processed["active_mask"])[sample_index].sum()),
                 decoded_points=decoded_count,
+                category_label=category_label,
             )
             records.append(
                 GeneratedSQVisualizationRecord(
                     split=split,
-                    sample_index=sample_index,
+                    sample_index=local_index,
+                    category_label=category_label,
                     sample_dir=sample_dir,
                     sq_mesh_path=sq_mesh_path,
                     preview_points_path=preview_points_path,

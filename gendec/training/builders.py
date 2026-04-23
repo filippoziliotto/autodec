@@ -1,5 +1,6 @@
 import random
 import os
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -7,6 +8,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from gendec.config import cfg_get
+from gendec.data.layout import available_categories
 from gendec.data.dataset import JointTokenDataset, ScaffoldTokenDataset
 from gendec.losses.flow_matching import FlowMatchingLoss, JointFlowMatchingLoss
 from gendec.models.set_transformer_flow import JointSetTransformerFlowModel, SetTransformerFlowModel
@@ -48,6 +50,24 @@ def _training_cfg(cfg):
 
 def _sampling_cfg(cfg):
     return cfg_get(cfg, "sampling", cfg_get(cfg, "sampler"))
+
+
+def _conditioning_kwargs(cfg):
+    conditioning_cfg = cfg_get(cfg, "conditioning")
+    enabled = bool(cfg_get(conditioning_cfg, "enabled", False))
+    num_classes = cfg_get(conditioning_cfg, "num_classes", None)
+    dataset_cfg = cfg_get(cfg, "dataset")
+    root = cfg_get(dataset_cfg, "root", None)
+    categories = cfg_get(dataset_cfg, "categories", None)
+    if num_classes is None and root is not None and Path(root).is_dir():
+        num_classes = len(available_categories(root, categories=categories))
+    if num_classes is None:
+        num_classes = 1
+    return {
+        "conditioning_enabled": enabled,
+        "num_classes": int(num_classes),
+        "class_embed_dim": cfg_get(conditioning_cfg, "class_embed_dim", None),
+    }
 
 
 def build_dataset(cfg, split=None):
@@ -98,6 +118,7 @@ def build_model(cfg):
         n_blocks=cfg_get(model_cfg, "n_blocks", 6),
         n_heads=cfg_get(model_cfg, "n_heads", 8),
         dropout=cfg_get(model_cfg, "dropout", 0.0),
+        **_conditioning_kwargs(cfg),
     )
 
 
@@ -196,6 +217,7 @@ def build_phase2_model(cfg):
         n_blocks=cfg_get(model_cfg, "n_blocks", 6),
         n_heads=cfg_get(model_cfg, "n_heads", 8),
         dropout=cfg_get(model_cfg, "dropout", 0.0),
+        **_conditioning_kwargs(cfg),
     )
 
 

@@ -3,6 +3,10 @@ run_name: gendec_phase2_eval
 dataset:
   root: gendec/data/ShapeNetPhase2
   split: test
+conditioning:
+  enabled: false
+  num_classes: null
+  class_embed_dim: null
 model:
   explicit_dim: 15
   residual_dim: 64
@@ -21,6 +25,7 @@ checkpoints:
 eval:
   batch_size: 8
   generated_num_samples: 4
+  generated_per_class: 5
   output_dir: gendec/data/eval
 sampling:
   preview_steps: 4

@@ -5,7 +5,7 @@ import torch
 from gendec.config import cfg_get
 from gendec.eval.metrics import MetricAverager
 from gendec.losses.path import build_flow_batch
-from gendec.sampling import sample_joint_scaffolds, sample_scaffolds
+from gendec.sampling import default_category_index, sample_joint_scaffolds, sample_scaffolds
 from gendec.tokens import TOKEN_DIM
 from gendec.training.ema import ModelEma
 from gendec.training.metric_logger import EpochMetricLogger
@@ -63,6 +63,8 @@ class Phase1Trainer:
         ema_decay = float(cfg_get(self.training_cfg, "ema_decay", 0.0) or 0.0)
         self.ema = ModelEma(self.model, decay=ema_decay) if ema_decay > 0.0 else None
         self.grad_clip_norm = cfg_get(self.training_cfg, "grad_clip_norm", None)
+        self.conditioning_active = bool(getattr(self.model, "conditioning_active", False))
+        self.num_classes = int(getattr(self.model, "num_classes", 1))
 
     def _move_batch(self, batch):
         moved = {}
@@ -84,6 +86,11 @@ class Phase1Trainer:
         metrics.update(teacher_active_count_metrics(batch))
         return metrics
 
+    def _preview_category_index(self, num_samples):
+        if not self.conditioning_active:
+            return None
+        return default_category_index(num_samples, self.num_classes, device=self.device)
+
     def _run_loader(self, loader, train_mode):
         if loader is None:
             return {}
@@ -102,7 +109,7 @@ class Phase1Trainer:
             batch_size = int(batch["tokens_e"].shape[0])
 
             with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-                v_hat = self.model(flow_batch["Et"], flow_batch["t"])
+                v_hat = self.model(flow_batch["Et"], flow_batch["t"], category_index=batch.get("category_index"))
                 loss, loss_metrics = self.loss_fn(flow_batch, v_hat)
 
             if train_mode:
@@ -141,6 +148,7 @@ class Phase1Trainer:
             num_steps=int(cfg_get(self.sampling_cfg, "preview_steps", cfg_get(self.sampling_cfg, "num_steps", 50))),
             exist_threshold=float(cfg_get(self.sampling_cfg, "exist_threshold", 0.5)),
             device=self.device,
+            category_index=self._preview_category_index(preview_samples),
         )
         metrics = sample_scaffold_metrics(processed)
 
@@ -296,6 +304,8 @@ class Phase2Trainer:
         ema_decay = float(cfg_get(self.training_cfg, "ema_decay", 0.0) or 0.0)
         self.ema = ModelEma(self.model, decay=ema_decay) if ema_decay > 0.0 else None
         self.grad_clip_norm = cfg_get(self.training_cfg, "grad_clip_norm", None)
+        self.conditioning_active = bool(getattr(self.model, "conditioning_active", False))
+        self.num_classes = int(getattr(self.model, "num_classes", 1))
 
         model_cfg = cfg_get(cfg, "model")
         self.explicit_dim = int(cfg_get(model_cfg, "explicit_dim", TOKEN_DIM))
@@ -322,6 +332,11 @@ class Phase2Trainer:
         metrics.update(teacher_active_count_metrics(batch))
         return metrics
 
+    def _preview_category_index(self, num_samples):
+        if not self.conditioning_active:
+            return None
+        return default_category_index(num_samples, self.num_classes, device=self.device)
+
     def _run_loader(self, loader, train_mode):
         if loader is None:
             return {}
@@ -340,7 +355,11 @@ class Phase2Trainer:
             batch_size = int(batch["tokens_ez"].shape[0])
 
             with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-                v_hat_e, v_hat_z, _ = self.model(flow_batch["Et"], flow_batch["t"])
+                v_hat_e, v_hat_z, _ = self.model(
+                    flow_batch["Et"],
+                    flow_batch["t"],
+                    category_index=batch.get("category_index"),
+                )
                 loss, loss_metrics = self.loss_fn(flow_batch, v_hat_e, v_hat_z)
 
             if train_mode:
@@ -381,6 +400,7 @@ class Phase2Trainer:
             exist_threshold=float(cfg_get(self.sampling_cfg, "exist_threshold", 0.5)),
             explicit_dim=self.explicit_dim,
             device=self.device,
+            category_index=self._preview_category_index(preview_samples),
         )
         metrics = sample_joint_scaffold_metrics(processed)
 

@@ -17,7 +17,7 @@ from gendec.eval.metrics import (
     token_channel_mean_abs,
 )
 from gendec.losses.path import build_flow_batch
-from gendec.sampling import sample_joint_scaffolds, sample_scaffolds
+from gendec.sampling import default_category_index, sample_joint_scaffolds, sample_scaffolds
 from gendec.training.builders import cfg_get
 from gendec.utils.inference import prune_points_by_active_primitives
 from gendec.utils.visualization import GeneratedSQVisualizer
@@ -25,6 +25,29 @@ from gendec.utils.visualization import GeneratedSQVisualizer
 
 def _batch_size(batch):
     return int(batch["tokens_e"].shape[0])
+
+
+def _conditioned_generation_plan(cfg, dataset, model, split, device, requested_num_samples=None):
+    eval_cfg = cfg_get(cfg, "eval")
+    num_samples = int(
+        cfg_get(eval_cfg, "generated_num_samples", 4)
+        if requested_num_samples is None
+        else requested_num_samples
+    )
+    conditioning_cfg = cfg_get(cfg, "conditioning")
+    conditioning_enabled = bool(cfg_get(conditioning_cfg, "enabled", False))
+    conditioning_active = conditioning_enabled and bool(getattr(model, "conditioning_active", False))
+    num_classes = int(getattr(dataset, "num_classes", 1))
+    if not conditioning_active or num_classes <= 1:
+        return num_samples, None, None
+
+    if split == "test":
+        per_class = int(cfg_get(eval_cfg, "generated_per_class", 5))
+        category_index = torch.arange(num_classes, device=device, dtype=torch.long).repeat_interleave(per_class)
+    else:
+        category_index = default_category_index(num_samples, num_classes, device=device)
+    category_labels = [dataset.category_ids[int(index)] for index in category_index.detach().cpu().tolist()]
+    return int(category_index.shape[0]), category_index, category_labels
 
 
 class Phase1Evaluator:
@@ -81,7 +104,7 @@ class Phase1Evaluator:
         )
         return self._frozen_autodec_decoder
 
-    def _write_generated_visualizations(self, generated):
+    def _write_generated_visualizations(self, generated, category_labels=None):
         vis_cfg = cfg_get(self.cfg, "visualization")
         if not cfg_get(vis_cfg, "enabled", True):
             return []
@@ -97,10 +120,13 @@ class Phase1Evaluator:
         return visualizer.write_generated(
             generated,
             split=self.split,
-            num_samples=cfg_get(vis_cfg, "generated_num_samples", 10),
+            num_samples=len(category_labels)
+            if category_labels is not None
+            else cfg_get(vis_cfg, "generated_num_samples", 10),
+            category_labels=category_labels,
         )
 
-    def _sample_generated(self, num_samples):
+    def _sample_generated(self, num_samples, category_index=None):
         sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
         return sample_scaffolds(
             model=self.model,
@@ -114,6 +140,7 @@ class Phase1Evaluator:
                 cfg_get(sampling_cfg, "exist_threshold", 0.5),
             ),
             device=self.device,
+            category_index=category_index,
         )
 
     def evaluate(self):
@@ -142,7 +169,7 @@ class Phase1Evaluator:
                 flow_batch["exist"] = batch["exist"]
                 flow_batch["token_mean"] = batch["token_mean"][0]
                 flow_batch["token_std"] = batch["token_std"][0]
-                v_hat = self.model(flow_batch["Et"], flow_batch["t"])
+                v_hat = self.model(flow_batch["Et"], flow_batch["t"], category_index=batch.get("category_index"))
                 _, metrics = self.loss_fn(flow_batch, v_hat, return_per_sample=True)
                 batch_size = _batch_size(batch)
                 total_samples += batch_size
@@ -165,7 +192,17 @@ class Phase1Evaluator:
                         }
                     )
 
-            generated = self._sample_generated(cfg_get(cfg_get(self.cfg, "eval"), "generated_num_samples", 4))
+            generated_num_samples, generated_category_index, generated_category_labels = _conditioned_generation_plan(
+                self.cfg,
+                self.dataset,
+                self.model,
+                self.split,
+                self.device,
+            )
+            generated = self._sample_generated(
+                generated_num_samples,
+                category_index=generated_category_index,
+            )
 
         metrics = averager.compute()
         metrics["generated_active_primitive_count"] = float(
@@ -221,6 +258,10 @@ class Phase1Evaluator:
                 "exist": generated["exist"].cpu(),
                 "active_mask": generated["active_mask"].cpu(),
                 "preview_points": generated["preview_points"].cpu(),
+                "category_index": None
+                if generated_category_index is None
+                else generated_category_index.detach().cpu(),
+                "category_id": generated_category_labels,
             },
             self.output_dir / "generated_samples.pt",
         )
@@ -231,16 +272,35 @@ class Phase1Evaluator:
                     "surface_points": generated_autodec["surface_points"].cpu(),
                     "decoded_weights": generated_autodec["decoded_weights"].cpu(),
                     "part_ids": generated_autodec["part_ids"].cpu(),
+                    "category_index": None
+                    if generated_category_index is None
+                    else generated_category_index.detach().cpu(),
+                    "category_id": generated_category_labels,
                 },
                 self.output_dir / cfg_get(self.autodec_decode_cfg, "output_filename", "generated_autodec_samples.pt"),
             )
         vis_cfg = cfg_get(self.cfg, "visualization")
         vis_num_samples = int(cfg_get(vis_cfg, "generated_num_samples", 10))
         visualization_generated = generated
+        visualization_category_labels = generated_category_labels
         if cfg_get(vis_cfg, "enabled", True) and self.split == "test" and vis_num_samples > int(generated["tokens"].shape[0]):
             with torch.no_grad():
-                visualization_generated = self._sample_generated(vis_num_samples)
-        visualization_records = self._write_generated_visualizations(visualization_generated)
+                vis_num_samples, vis_category_index, visualization_category_labels = _conditioned_generation_plan(
+                    self.cfg,
+                    self.dataset,
+                    self.model,
+                    self.split,
+                    self.device,
+                    requested_num_samples=vis_num_samples,
+                )
+                visualization_generated = self._sample_generated(
+                    vis_num_samples,
+                    category_index=vis_category_index,
+                )
+        visualization_records = self._write_generated_visualizations(
+            visualization_generated,
+            category_labels=visualization_category_labels,
+        )
         payload["num_visualizations"] = len(visualization_records)
         return payload
 
@@ -299,7 +359,7 @@ class Phase2Evaluator:
         )
         return self._frozen_autodec_decoder
 
-    def _write_generated_visualizations(self, generated, generated_autodec=None):
+    def _write_generated_visualizations(self, generated, generated_autodec=None, category_labels=None):
         vis_cfg = cfg_get(self.cfg, "visualization")
         if not cfg_get(vis_cfg, "enabled", True):
             return []
@@ -315,13 +375,16 @@ class Phase2Evaluator:
         return visualizer.write_generated(
             generated,
             split=self.split,
-            num_samples=cfg_get(vis_cfg, "generated_num_samples", 10),
+            num_samples=len(category_labels)
+            if category_labels is not None
+            else cfg_get(vis_cfg, "generated_num_samples", 10),
             decoded_points=None
             if generated_autodec is None
             else generated_autodec.get("decoded_points_pruned", generated_autodec.get("decoded_points")),
+            category_labels=category_labels,
         )
 
-    def _sample_generated(self, num_samples):
+    def _sample_generated(self, num_samples, category_index=None):
         sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
         model_cfg = cfg_get(self.cfg, "model")
         explicit_dim = int(cfg_get(model_cfg, "explicit_dim", 15))
@@ -339,6 +402,7 @@ class Phase2Evaluator:
             ),
             explicit_dim=explicit_dim,
             device=self.device,
+            category_index=category_index,
         )
 
     def evaluate(self):
@@ -368,7 +432,11 @@ class Phase2Evaluator:
                 flow_batch["token_mean"] = batch["token_mean"][0]
                 flow_batch["token_std"] = batch["token_std"][0]
                 flow_batch["E0"] = batch["tokens_ez"]
-                v_hat_e, v_hat_z, v_hat = self.model(flow_batch["Et"], flow_batch["t"])
+                v_hat_e, v_hat_z, v_hat = self.model(
+                    flow_batch["Et"],
+                    flow_batch["t"],
+                    category_index=batch.get("category_index"),
+                )
                 _, metrics = self.loss_fn(flow_batch, v_hat_e, v_hat_z, v_hat=v_hat, return_per_sample=True)
                 batch_size = int(batch["tokens_ez"].shape[0])
                 total_samples += batch_size
@@ -391,7 +459,17 @@ class Phase2Evaluator:
                         }
                     )
 
-            generated = self._sample_generated(cfg_get(cfg_get(self.cfg, "eval"), "generated_num_samples", 4))
+            generated_num_samples, generated_category_index, generated_category_labels = _conditioned_generation_plan(
+                self.cfg,
+                self.dataset,
+                self.model,
+                self.split,
+                self.device,
+            )
+            generated = self._sample_generated(
+                generated_num_samples,
+                category_index=generated_category_index,
+            )
 
         metrics = averager.compute()
         metrics["generated_active_primitive_count"] = float(
@@ -464,6 +542,10 @@ class Phase2Evaluator:
                 "exist": generated["exist"].cpu(),
                 "active_mask": generated["active_mask"].cpu(),
                 "preview_points": generated["preview_points"].cpu(),
+                "category_index": None
+                if generated_category_index is None
+                else generated_category_index.detach().cpu(),
+                "category_id": generated_category_labels,
             },
             self.output_dir / "generated_samples.pt",
         )
@@ -486,16 +568,32 @@ class Phase2Evaluator:
                     "surface_points_raw": generated_autodec["surface_points"].cpu(),
                     "decoded_weights": generated_autodec["decoded_weights"].cpu(),
                     "part_ids": generated_autodec["part_ids"].cpu(),
+                    "category_index": None
+                    if generated_category_index is None
+                    else generated_category_index.detach().cpu(),
+                    "category_id": generated_category_labels,
                 },
                 self.output_dir / cfg_get(self.autodec_decode_cfg, "output_filename", "generated_autodec_samples.pt"),
             )
         vis_cfg = cfg_get(self.cfg, "visualization")
         vis_num_samples = int(cfg_get(vis_cfg, "generated_num_samples", 10))
         visualization_generated = generated
+        visualization_category_labels = generated_category_labels
         visualization_generated_autodec = generated_autodec
         if cfg_get(vis_cfg, "enabled", True) and self.split == "test" and vis_num_samples > int(generated["tokens"].shape[0]):
             with torch.no_grad():
-                visualization_generated = self._sample_generated(vis_num_samples)
+                vis_num_samples, vis_category_index, visualization_category_labels = _conditioned_generation_plan(
+                    self.cfg,
+                    self.dataset,
+                    self.model,
+                    self.split,
+                    self.device,
+                    requested_num_samples=vis_num_samples,
+                )
+                visualization_generated = self._sample_generated(
+                    vis_num_samples,
+                    category_index=vis_category_index,
+                )
                 if self._autodec_decode_enabled():
                     bridge = self._get_frozen_autodec_decoder()
                     visualization_generated_autodec = decode_joint_scaffolds(
@@ -515,6 +613,7 @@ class Phase2Evaluator:
         visualization_records = self._write_generated_visualizations(
             visualization_generated,
             generated_autodec=visualization_generated_autodec,
+            category_labels=visualization_category_labels,
         )
         payload["num_visualizations"] = len(visualization_records)
         return payload

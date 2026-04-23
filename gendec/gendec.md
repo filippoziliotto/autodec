@@ -4,19 +4,20 @@
 
 `gendec/` is the generative scaffold package. It now owns both:
 
-- Phase 1: unconditional scaffold-only generation over explicit SQ tokens `E`
-- Phase 2: unconditional joint generation over AutoDec bottleneck tokens `(E, Z)`
+- Phase 1: scaffold-only generation over explicit SQ tokens `E`, either unconditional or optionally conditioned on ShapeNet class
+- Phase 2: joint generation over AutoDec bottleneck tokens `(E, Z)`, either unconditional or optionally conditioned on ShapeNet class
 
 It owns:
 
 - teacher export from frozen SuperDec or AutoDec outputs into ordered scaffold or joint tokens
 - normalized token datasets over ShapeNet-style directory layouts
 - token-space flow models and losses for Phase 1 and Phase 2
+- optional learned class conditioning for both phases, active only when enabled and `num_classes > 1`
 - training, sampling, and evaluation entrypoints for both phases
 - shell scripts for export, training, validation evaluation, and test evaluation
 - optional eval-only coarse decoding of sampled scaffolds through a frozen AutoDec decoder with zero residual latents
 - Phase 2 joint decoding of sampled `(E,Z)` tokens through the frozen AutoDec decoder, with the sampled existence threshold applied before coarse reconstruction export
-- generated-SQ visualization exports for test evaluation under `data/viz/`, including Phase 2 `decoded_points.ply` reconstructions pruned to active primitives when frozen AutoDec decoding is enabled
+- generated-SQ visualization exports for test evaluation under `data/viz/`, including Phase 2 `decoded_points.ply` reconstructions pruned to active primitives when frozen AutoDec decoding is enabled and per-class grouping when conditioned test generation is active
 - preview-video rendering under `gendec/videos/<run_name>/video_000000.mp4`, `video_000001.mp4`, and related per-sample outputs
 - package-level documentation and tests
 
@@ -56,18 +57,19 @@ When code or configs in a documented folder change, the matching folder markdown
 
 ### `sample.py`
 
-- CLI entrypoint for unconditional scaffold sampling from a checkpoint.
-- `run_sample(cfg)`: loads normalization stats, restores the best or explicit checkpoint, samples scaffolds, and saves `samples.pt`.
+- CLI entrypoint for scaffold sampling from a checkpoint.
+- `run_sample(cfg)`: loads normalization stats, restores the best or explicit checkpoint, samples scaffolds, and saves `samples.pt`. If class conditioning is active, it cycles through class ids by default unless the caller overrides sampling behavior.
 - `_main(cfg)`: prints the output artifact path.
 
 ### `sampling.py`
 
 - Runtime sampling and postprocessing helpers used by sampling and evaluation.
-- `euler_sample(...)`: integrates the learned velocity field from `t=1` to `t=0` in normalized token space.
+- `euler_sample(...)`: integrates the learned velocity field from `t=1` to `t=0` in normalized token space, with optional class ids.
+- `default_category_index(...)`: builds a deterministic cyclic class-id batch for conditioned sampling.
 - `postprocess_tokens(...)`: unnormalizes tokens, splits channels, clamps visualization-sensitive fields, converts rotations, and computes active masks.
 - `_signed_power(...)`: signed exponent helper used for superquadric surface evaluation.
 - `render_scaffold_preview(...)`: renders active superquadric preview points.
-- `sample_scaffolds(...)`: end-to-end wrapper returning processed sampled scaffolds plus preview points.
+- `sample_scaffolds(...)`: end-to-end wrapper returning processed sampled scaffolds plus preview points, with optional class ids.
 
 ### `tokens.py`
 

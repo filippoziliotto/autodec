@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from gendec.models.components import GlobalToken, SetTransformerBlock, TokenProjection, VelocityHead
+from gendec.models.components import ClassConditioning, GlobalToken, SetTransformerBlock, TokenProjection, VelocityHead
 from gendec.models.time_embedding import SinusoidalTimeEmbedding
 from gendec.tokens import TOKEN_DIM
 
@@ -14,22 +14,49 @@ class SetTransformerFlowModel(nn.Module):
         n_blocks=6,
         n_heads=8,
         dropout=0.0,
+        conditioning_enabled=False,
+        num_classes=1,
+        class_embed_dim=None,
     ):
         super().__init__()
         self.token_dim = token_dim
+        self.num_classes = int(num_classes)
+        self.conditioning_enabled = bool(conditioning_enabled)
+        self.conditioning_active = self.conditioning_enabled and self.num_classes > 1
         self.token_projection = TokenProjection(token_dim=token_dim, hidden_dim=hidden_dim)
         self.time_embedding = SinusoidalTimeEmbedding(hidden_dim=hidden_dim)
         self.global_token = GlobalToken(hidden_dim=hidden_dim)
+        self.class_conditioning = (
+            ClassConditioning(self.num_classes, hidden_dim=hidden_dim, embedding_dim=class_embed_dim)
+            if self.conditioning_active
+            else None
+        )
         self.blocks = nn.ModuleList(
             [SetTransformerBlock(hidden_dim=hidden_dim, n_heads=n_heads, dropout=dropout) for _ in range(n_blocks)]
         )
         self.velocity_head = VelocityHead(hidden_dim=hidden_dim, token_dim=token_dim)
 
-    def forward(self, et, t):
+    def _class_hidden(self, category_index, batch_size, device):
+        if not self.conditioning_active:
+            return None
+        if category_index is None:
+            category_index = torch.zeros(batch_size, dtype=torch.long, device=device)
+        elif not torch.is_tensor(category_index):
+            category_index = torch.tensor(category_index, dtype=torch.long, device=device)
+        else:
+            category_index = category_index.to(device=device, dtype=torch.long).view(batch_size)
+        return self.class_conditioning(category_index)
+
+    def forward(self, et, t, category_index=None):
         token_hidden = self.token_projection(et)
         time_hidden = self.time_embedding(t).unsqueeze(1)
         token_hidden = token_hidden + time_hidden
+        class_hidden = self._class_hidden(category_index, et.shape[0], et.device)
+        if class_hidden is not None:
+            token_hidden = token_hidden + class_hidden.unsqueeze(1)
         global_token = self.global_token(et.shape[0])
+        if class_hidden is not None:
+            global_token = global_token + class_hidden.unsqueeze(1)
         hidden = torch.cat([global_token, token_hidden], dim=1)
         for block in self.blocks:
             hidden = block(hidden)
@@ -63,22 +90,44 @@ class JointSetTransformerFlowModel(nn.Module):
         n_blocks=6,
         n_heads=8,
         dropout=0.0,
+        conditioning_enabled=False,
+        num_classes=1,
+        class_embed_dim=None,
     ):
         super().__init__()
         self.explicit_dim = int(explicit_dim)
         self.residual_dim = int(residual_dim)
         self.token_dim = self.explicit_dim + self.residual_dim
+        self.num_classes = int(num_classes)
+        self.conditioning_enabled = bool(conditioning_enabled)
+        self.conditioning_active = self.conditioning_enabled and self.num_classes > 1
 
         self.token_projection = TokenProjection(token_dim=self.token_dim, hidden_dim=hidden_dim)
         self.time_embedding = SinusoidalTimeEmbedding(hidden_dim=hidden_dim)
         self.global_token = GlobalToken(hidden_dim=hidden_dim)
+        self.class_conditioning = (
+            ClassConditioning(self.num_classes, hidden_dim=hidden_dim, embedding_dim=class_embed_dim)
+            if self.conditioning_active
+            else None
+        )
         self.blocks = nn.ModuleList(
             [SetTransformerBlock(hidden_dim=hidden_dim, n_heads=n_heads, dropout=dropout) for _ in range(n_blocks)]
         )
         self.explicit_head = VelocityHead(hidden_dim=hidden_dim, token_dim=self.explicit_dim)
         self.residual_head = VelocityHead(hidden_dim=hidden_dim, token_dim=self.residual_dim)
 
-    def forward(self, tt, t):
+    def _class_hidden(self, category_index, batch_size, device):
+        if not self.conditioning_active:
+            return None
+        if category_index is None:
+            category_index = torch.zeros(batch_size, dtype=torch.long, device=device)
+        elif not torch.is_tensor(category_index):
+            category_index = torch.tensor(category_index, dtype=torch.long, device=device)
+        else:
+            category_index = category_index.to(device=device, dtype=torch.long).view(batch_size)
+        return self.class_conditioning(category_index)
+
+    def forward(self, tt, t, category_index=None):
         """Forward pass.
 
         Args:
@@ -93,7 +142,12 @@ class JointSetTransformerFlowModel(nn.Module):
         token_hidden = self.token_projection(tt)
         time_hidden = self.time_embedding(t).unsqueeze(1)
         token_hidden = token_hidden + time_hidden
+        class_hidden = self._class_hidden(category_index, tt.shape[0], tt.device)
+        if class_hidden is not None:
+            token_hidden = token_hidden + class_hidden.unsqueeze(1)
         global_token = self.global_token(tt.shape[0])
+        if class_hidden is not None:
+            global_token = global_token + class_hidden.unsqueeze(1)
         hidden = torch.cat([global_token, token_hidden], dim=1)
         for block in self.blocks:
             hidden = block(hidden)

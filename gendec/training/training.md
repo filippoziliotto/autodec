@@ -23,6 +23,7 @@ If training construction, checkpoint semantics, or metric logging behavior chang
 - `build_wandb_run(cfg)`: initializes `wandb.init(project=..., name=run_name)` when `use_wandb` is enabled.
 - `_training_cfg(cfg)`: resolves the training section while keeping backward compatibility with the older `trainer` key.
 - `_sampling_cfg(cfg)`: resolves the sampling section while keeping backward compatibility with the older `sampler` key.
+- `_conditioning_kwargs(cfg)`: resolves optional class-conditioning settings, inferring `num_classes` from the exported dataset root when not provided explicitly.
 - `build_dataset(cfg, split=None)`, `build_dataloader(...)`, `build_train_val_dataloaders(cfg)`: Phase 1 dataset and loader builders.
 - `build_model(cfg)`, `build_loss(cfg)`: Phase 1 model and loss builders.
 - `build_phase2_dataset(cfg, split=None)`, `build_phase2_dataloader(...)`, `build_phase2_train_val_dataloaders(cfg)`: Phase 2 dataset and loader builders.
@@ -63,5 +64,5 @@ If training construction, checkpoint semantics, or metric logging behavior chang
 ### `trainer.py`
 
 - Main training loop implementations.
-- `Phase1Trainer`: Phase 1 train/val loop with sampling diagnostics, tqdm console logging, checkpointing, JSONL logging, EMA, and optional WandB logging.
-- `Phase2Trainer`: Phase 2 train/val loop with joint-token flow batches, split explicit/residual metrics, joint sampling diagnostics, checkpointing, JSONL logging, EMA, and optional WandB logging.
+- `Phase1Trainer`: Phase 1 train/val loop with optional class-conditioned forward passes, sampling diagnostics, tqdm console logging, checkpointing, JSONL logging, EMA, and optional WandB logging.
+- `Phase2Trainer`: Phase 2 train/val loop with optional class-conditioned joint-token forward passes, split explicit/residual metrics, joint sampling diagnostics, checkpointing, JSONL logging, EMA, and optional WandB logging.

@@ -3,6 +3,10 @@ run_name: gendec_eval_val
 dataset:
   root: gendec/data/ShapeNet
   split: val
+conditioning:
+  enabled: false
+  num_classes: null
+  class_embed_dim: null
 model:
   token_dim: 15
   hidden_dim: 256
@@ -18,6 +22,7 @@ checkpoints:
 eval:
   batch_size: 8
   generated_num_samples: 4
+  generated_per_class: 5
   output_dir: gendec/data/eval
 sampling:
   preview_steps: 50

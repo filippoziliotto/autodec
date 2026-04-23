@@ -28,10 +28,13 @@ If evaluation metrics, outputs, or checkpoint-loading behavior change, this file
 
 - Core evaluation loop implementation.
 - `_batch_size(batch)`: extracts Phase 1 batch size from `tokens_e`.
+- `_conditioned_generation_plan(cfg, dataset, model, split, device, requested_num_samples=None)`: resolves whether generated sampling should be unconditional or per-class, and returns the matching category-index batch plus category labels.
 - `Phase1Evaluator`: held-out Phase 1 evaluation plus optional zero-residual AutoDec decode and generated-SQ visualization export.
+  - When class conditioning is enabled and the exported dataset has more than one class, the Phase 1 test evaluator generates `eval.generated_per_class` samples for every category instead of a single global unconditional batch.
 - `Phase2Evaluator`: held-out Phase 2 evaluation over `tokens_ez`, optional generated `(E,Z)` AutoDec decoding, and generated-SQ visualization export from the explicit scaffold portion.
   - When the frozen AutoDec decode branch is enabled on the Phase 2 test split, the evaluator prunes generated `surface_points` and `decoded_points` down to active primitives only before reporting coarse plausibility metrics, writing `generated_autodec_samples.pt`, and exporting `decoded_points.ply`.
   - The saved batch artifact now contains both pruned and raw point clouds: `decoded_points`, `surface_points`, `decoded_points_raw`, and `surface_points_raw`.
+  - When class conditioning is enabled and the exported dataset has more than one class, the Phase 2 test evaluator generates `eval.generated_per_class` samples for every category and writes category-grouped visualization folders.
 
 ### `metrics.py`
 

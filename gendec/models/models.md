@@ -13,7 +13,7 @@ If the model architecture, tensor contract, or helper geometry conversions chang
 ### `__init__.py`
 
 - Re-export surface for the model layer.
-- Exposes `GlobalToken`, `SetTransformerBlock`, `SetTransformerFlowModel`, `JointSetTransformerFlowModel`, `TokenProjection`, `VelocityHead`, `matrix_to_rot6d`, and `rot6d_to_matrix`.
+- Exposes `ClassConditioning`, `GlobalToken`, `SetTransformerBlock`, `SetTransformerFlowModel`, `JointSetTransformerFlowModel`, `TokenProjection`, `VelocityHead`, `matrix_to_rot6d`, and `rot6d_to_matrix`.
 
 ### `components.py`
 
@@ -21,6 +21,7 @@ If the model architecture, tensor contract, or helper geometry conversions chang
 - `TokenProjection`: token projection MLP from raw token space into hidden space.
 - `GlobalToken`: learned global token expanded to `[B,1,H]`.
 - `VelocityHead`: token-wise velocity prediction head.
+- `ClassConditioning`: learned class embedding plus optional projection into the transformer hidden width.
 - `SetTransformerBlock`: one self-attention + feed-forward transformer block.
 
 ### `rotation.py`
@@ -33,11 +34,13 @@ If the model architecture, tensor contract, or helper geometry conversions chang
 
 - Top-level flow networks.
 - `SetTransformerFlowModel`:
-  - `__init__(token_dim=15, hidden_dim=256, n_blocks=6, n_heads=8, dropout=0.0)`: wires token projection, time embedding, global token, attention blocks, and the single velocity head for Phase 1.
-  - `forward(et, t)`: predicts token-space velocities from interpolated scaffold tokens and scalar times.
+  - `__init__(token_dim=15, hidden_dim=256, n_blocks=6, n_heads=8, dropout=0.0, conditioning_enabled=False, num_classes=1, class_embed_dim=None)`: wires token projection, time embedding, optional class conditioning, global token, attention blocks, and the single velocity head for Phase 1.
+  - `conditioning_active`: becomes `True` only when conditioning is enabled and `num_classes > 1`.
+  - `forward(et, t, category_index=None)`: predicts token-space velocities from interpolated scaffold tokens, scalar times, and optional class ids.
 - `JointSetTransformerFlowModel`:
-  - `__init__(explicit_dim=15, residual_dim=64, hidden_dim=384, n_blocks=6, n_heads=8, dropout=0.0)`: wires the shared backbone and two output heads for explicit and residual velocities.
-  - `forward(tt, t)`: predicts `v_hat_e`, `v_hat_z`, and the concatenated `v_hat` from interpolated joint tokens and scalar times.
+  - `__init__(explicit_dim=15, residual_dim=64, hidden_dim=384, n_blocks=6, n_heads=8, dropout=0.0, conditioning_enabled=False, num_classes=1, class_embed_dim=None)`: wires the shared backbone, optional class conditioning, and two output heads for explicit and residual velocities.
+  - `conditioning_active`: becomes `True` only when conditioning is enabled and `num_classes > 1`.
+  - `forward(tt, t, category_index=None)`: predicts `v_hat_e`, `v_hat_z`, and the concatenated `v_hat` from interpolated joint tokens, scalar times, and optional class ids.
 
 ### `time_embedding.py`
 

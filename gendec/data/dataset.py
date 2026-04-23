@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from torch.utils.data import Dataset
+import torch
 
 from gendec.data.examples import load_teacher_example
-from gendec.data.layout import iter_exported_examples, normalization_stats_path
+from gendec.data.layout import build_category_vocab, iter_exported_examples, normalization_stats_path
 from gendec.data.normalization import load_normalization_stats, normalize_tokens
 from gendec.tokens import TOKEN_DIM
 
@@ -22,6 +23,8 @@ class ScaffoldTokenDataset(Dataset):
         )
         if not self.index:
             raise FileNotFoundError(f"No scaffold examples found in {self.root}")
+        self.category_ids, self.category_to_index = build_category_vocab(self.root, categories=self.categories)
+        self.num_classes = len(self.category_ids)
         self.files = [item["path"] for item in self.index]
         self.models = [
             {"category_id": item["category_id"], "model_id": item["model_id"]}
@@ -40,6 +43,7 @@ class ScaffoldTokenDataset(Dataset):
         item["tokens_e"] = normalize_tokens(tokens_e_raw, self.stats)
         item["token_mean"] = self.stats["mean"].clone()
         item["token_std"] = self.stats["std"].clone()
+        item["category_index"] = torch.tensor(self.category_to_index[str(example["category_id"])], dtype=torch.long)
         return item
 
 
@@ -77,6 +81,8 @@ class JointTokenDataset(Dataset):
         )
         if not self.index:
             raise FileNotFoundError(f"No Phase 2 joint examples found in {self.root}")
+        self.category_ids, self.category_to_index = build_category_vocab(self.root, categories=self.categories)
+        self.num_classes = len(self.category_ids)
         self.files = [item["path"] for item in self.index]
         self.models = [
             {"category_id": item["category_id"], "model_id": item["model_id"]}
@@ -106,6 +112,7 @@ class JointTokenDataset(Dataset):
         item["tokens_z"] = tokens_ez_raw[..., TOKEN_DIM:]
         item["token_mean"] = self.stats["mean"].clone()
         item["token_std"] = self.stats["std"].clone()
+        item["category_index"] = torch.tensor(self.category_to_index[str(example["category_id"])], dtype=torch.long)
         return item
 
 

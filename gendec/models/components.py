@@ -38,6 +38,26 @@ class VelocityHead(nn.Module):
         return self.net(hidden)
 
 
+class ClassConditioning(nn.Module):
+    def __init__(self, num_classes, hidden_dim, embedding_dim=None):
+        super().__init__()
+        if embedding_dim is None:
+            embedding_dim = hidden_dim
+        self.embedding = nn.Embedding(int(num_classes), int(embedding_dim))
+        self.projector = (
+            nn.Identity()
+            if int(embedding_dim) == int(hidden_dim)
+            else nn.Sequential(
+                nn.Linear(int(embedding_dim), int(hidden_dim)),
+                nn.SiLU(),
+                nn.Linear(int(hidden_dim), int(hidden_dim)),
+            )
+        )
+
+    def forward(self, category_index):
+        return self.projector(self.embedding(category_index))
+
+
 class SetTransformerBlock(nn.Module):
     def __init__(self, hidden_dim, n_heads, dropout=0.0):
         super().__init__()

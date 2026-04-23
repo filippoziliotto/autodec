@@ -19,7 +19,7 @@ import torch
 from gendec.config import explicit_config_argument, fallback_cli_config, load_yaml_config
 from gendec.data.layout import normalization_stats_path
 from gendec.data.normalization import load_normalization_stats
-from gendec.sampling import sample_scaffolds
+from gendec.sampling import default_category_index, sample_scaffolds
 from gendec.training.builders import build_model, cfg_get
 from gendec.training.checkpoints import load_phase1_checkpoint
 
@@ -38,6 +38,13 @@ def run_sample(cfg):
         cfg_get(trainer_cfg, "checkpoint_path", cfg_get(trainer_cfg, "resume_from")),
     )
     load_phase1_checkpoint(model, checkpoint_path, map_location=device)
+    category_index = None
+    if bool(getattr(model, "conditioning_active", False)):
+        category_index = default_category_index(
+            cfg_get(sampler_cfg, "num_samples", 1),
+            getattr(model, "num_classes", 1),
+            device=device,
+        )
     result = sample_scaffolds(
         model=model,
         stats=stats,
@@ -46,6 +53,7 @@ def run_sample(cfg):
         num_steps=cfg_get(sampler_cfg, "eval_steps", cfg_get(sampler_cfg, "num_steps", 50)),
         exist_threshold=cfg_get(sampler_cfg, "exist_threshold", 0.5),
         device=device,
+        category_index=category_index,
     )
     output_dir = Path(cfg_get(sampler_cfg, "output_dir", root / "samples"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +64,7 @@ def run_sample(cfg):
             "exist": result["exist"].cpu(),
             "active_mask": result["active_mask"].cpu(),
             "preview_points": result["preview_points"].cpu(),
+            "category_index": None if category_index is None else category_index.detach().cpu(),
         },
         output_path,
     )

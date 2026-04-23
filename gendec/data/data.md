@@ -43,14 +43,20 @@ If any file in this folder changes its schema, indexing rules, or helper behavio
 
 - Dataset loaders used by training and evaluation.
 - `ScaffoldTokenDataset`:
-  - `__init__(root, split=None, categories=None)`: indexes exported Phase 1 examples and loads normalization stats.
+  - `__init__(root, split=None, categories=None)`: indexes exported Phase 1 examples, builds a stable category vocabulary, and loads normalization stats.
+  - `category_ids`: sorted exported category ids visible to the dataset.
+  - `category_to_index`: mapping from `category_id` to stable integer class index.
+  - `num_classes`: number of visible classes.
   - `__len__()`: returns the number of indexed teacher examples.
-  - `__getitem__(idx)`: returns raw scaffold tokens, normalized tokens, normalization stats, metadata, and auxiliary tensors.
+  - `__getitem__(idx)`: returns raw scaffold tokens, normalized tokens, normalization stats, metadata, `category_index`, and auxiliary tensors.
 - `JointTokenDataset`:
-  - `__init__(root, split=None, categories=None)`: indexes exported Phase 2 examples and loads joint-token normalization stats.
+  - `__init__(root, split=None, categories=None)`: indexes exported Phase 2 examples, builds a stable category vocabulary, and loads joint-token normalization stats.
+  - `category_ids`: sorted exported category ids visible to the dataset.
+  - `category_to_index`: mapping from `category_id` to stable integer class index.
+  - `num_classes`: number of visible classes.
   - `residual_dim`: inferred residual width from the normalization-stat width.
   - `__len__()`: returns the number of indexed joint teacher examples.
-  - `__getitem__(idx)`: returns normalized `tokens_ez`, raw `tokens_ez_raw`, split `tokens_e`, split `tokens_z`, normalization stats, metadata, and auxiliary tensors.
+  - `__getitem__(idx)`: returns normalized `tokens_ez`, raw `tokens_ez_raw`, split `tokens_e`, split `tokens_z`, normalization stats, metadata, `category_index`, and auxiliary tensors.
 - `load_normalization_stats`: re-export alias to the normalization loader.
 
 ### `examples.py`
@@ -70,6 +76,8 @@ If any file in this folder changes its schema, indexing rules, or helper behavio
 - `scaffold_example_path(root, category_id, model_id)`: returns the `teacher_scaffold.pt` path.
 - `split_manifest_path(root, category_id, split)`: returns the `{split}.lst` manifest path.
 - `_read_manifest(path)`: parses manifest files into model-id lists.
+- `available_categories(root, categories=None)`: resolves the visible exported category ids from disk or an explicit filter.
+- `build_category_vocab(root, categories=None)`: returns the stable sorted category list plus `category_id -> index` mapping.
 - `iter_exported_examples(root, split=None, categories=None)`: yields indexed exported examples using manifests when available and directory scans otherwise.
 - `write_split_manifest(root, split, model_index)`: writes per-category split manifests.
 

@@ -25,13 +25,23 @@ def _read_manifest(path):
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def available_categories(root, categories=None):
+    root = Path(root)
+    if categories is None:
+        categories = [path.name for path in root.iterdir() if path.is_dir()]
+    return sorted(str(category_id) for category_id in categories if (root / str(category_id)).is_dir())
+
+
+def build_category_vocab(root, categories=None):
+    category_ids = available_categories(root, categories=categories)
+    return category_ids, {category_id: index for index, category_id in enumerate(category_ids)}
+
+
 def iter_exported_examples(root, split=None, categories=None):
     root = Path(root)
-    available_categories = categories
-    if available_categories is None:
-        available_categories = sorted(path.name for path in root.iterdir() if path.is_dir())
+    available = available_categories(root, categories=categories)
 
-    for category_id in available_categories:
+    for category_id in available:
         category_dir = root / category_id
         if not category_dir.is_dir():
             continue

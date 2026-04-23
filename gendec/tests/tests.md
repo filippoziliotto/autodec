@@ -18,6 +18,10 @@ If a new top-level test file is added here, or an existing test changes scope, t
 
 - Verifies console metric formatting and end-of-epoch printed summaries for both Phase 1 and Phase 2 training.
 
+### `test_conditioning.py`
+
+- Verifies multi-class dataset category indexing plus the optional class-conditioned Phase 1 and Phase 2 model forward contracts.
+
 ### `test_dataset.py`
 
 - Covers the Phase 1 exported-example schema, split manifests, normalization stats, and toy multi-split export path.

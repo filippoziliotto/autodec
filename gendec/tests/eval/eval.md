@@ -24,6 +24,8 @@ If evaluation test coverage changes in this subfolder, this file must be updated
 - `test_phase1_evaluator_writes_metrics_and_per_sample_rows`: verifies that `Phase1Evaluator` writes `metrics.json`, `per_sample_metrics.jsonl`, includes generated-sample summary metrics, and writes generated SQ visualization folders under the configured `data/viz/...` root.
 - `test_phase1_evaluator_can_decode_generated_scaffolds_with_frozen_autodec_decoder`: verifies the optional frozen AutoDec decode branch writes coarse plausibility metrics and a decoded sample artifact.
 - `test_phase2_evaluator_writes_decoded_point_cloud_visualizations`: verifies that `Phase2Evaluator` writes `decoded_points.ply` into each generated visualization folder when the frozen AutoDec decode branch is enabled, using the active-primitive-pruned Phase 2 reconstruction.
+- `test_phase1_conditioned_test_eval_generates_five_samples_per_class`: verifies that conditioned Phase 1 test evaluation writes exactly five generated samples for each class into per-category visualization folders.
+- `test_phase2_conditioned_test_eval_generates_five_samples_per_class`: verifies that conditioned Phase 2 test evaluation writes exactly five generated samples for each class into per-category visualization folders.
 
 ### `test_metrics.py`
 

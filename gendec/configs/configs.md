@@ -15,6 +15,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 - Main evaluation preset for a trained full-size Phase 1 model.
 - Evaluates `gendec/data/ShapeNet` on `split: test`.
 - Includes optional zero-residual AutoDec decode for coarse plausibility metrics.
+- Includes a `conditioning` block for optional class conditioning and `eval.generated_per_class` for class-conditioned test generation.
 
 ### `eval_val.yaml`
 
@@ -34,6 +35,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 - Enables the frozen AutoDec decode branch by default, using:
   - `checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/config.yaml`
   - `checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/epoch_200.pt`
+- Includes a `conditioning` block for optional class conditioning and `eval.generated_per_class` for class-conditioned test generation.
 
 ### `eval_phase2_val.yaml`
 
@@ -49,6 +51,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 
 - Sampling-only preset for unconditional Phase 1 generation from a trained checkpoint.
 - Uses `dataset.root` only to locate normalization stats and checkpoint-compatible token dimensions.
+- Includes a `conditioning` block so conditioned checkpoints can cycle through class indices at sampling time.
 
 ### `preview_video.yaml`
 
@@ -64,6 +67,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 ### `smoke.yaml`
 
 - End-to-end smoke preset used for toy Phase 1 export, training, and sampling verification.
+- Keeps class conditioning disabled by default.
 
 ### `teacher_export.yaml`
 
@@ -95,6 +99,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 - Main Phase 1 training preset.
 - Enables WandB by default.
 - Uses AdamW, cosine warmup, EMA, preview sampling, and last/best checkpoint writing.
+- Includes a `conditioning` block that can enable learned class embeddings when training on multi-class exported roots.
 
 ### `train_phase2.yaml`
 
@@ -106,3 +111,4 @@ When any config file changes, this file must be updated to reflect the new purpo
   - `gendec/data/checkpoints/phase2_best.pt`
   - `gendec/data/checkpoints/phase2_metrics.jsonl`
 - Uses `gendec/data/previews_phase2` for training-time preview artifacts.
+- Includes a `conditioning` block that can enable learned class embeddings when training on multi-class exported roots.

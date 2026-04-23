@@ -5,20 +5,42 @@ from gendec.models.rotation import rot6d_to_matrix
 from gendec.tokens import PRIMITIVE_COUNT, TOKEN_DIM, split_scaffold_tokens
 
 
-def euler_sample(model, num_samples, token_dim=TOKEN_DIM, num_steps=50, device="cpu"):
+def _normalize_category_index(category_index, num_samples, device):
+    if category_index is None:
+        return None
+    if not torch.is_tensor(category_index):
+        category_index = torch.tensor(category_index, dtype=torch.long, device=device)
+    else:
+        category_index = category_index.to(device=device, dtype=torch.long)
+    if category_index.ndim == 0:
+        category_index = category_index.expand(num_samples)
+    if category_index.shape[0] != num_samples:
+        raise ValueError(f"category_index must have shape [{num_samples}] or be scalar")
+    return category_index
+
+
+def default_category_index(num_samples, num_classes, device="cpu"):
+    num_classes = int(num_classes)
+    if num_classes <= 1:
+        return torch.zeros(int(num_samples), dtype=torch.long, device=device)
+    return torch.arange(int(num_samples), device=device, dtype=torch.long) % num_classes
+
+
+def euler_sample(model, num_samples, token_dim=TOKEN_DIM, num_steps=50, device="cpu", category_index=None):
     model.eval()
+    category_index = _normalize_category_index(category_index, num_samples, device)
     tokens = torch.randn(num_samples, PRIMITIVE_COUNT, token_dim, device=device)
     time_grid = torch.linspace(1.0, 0.0, steps=num_steps + 1, device=device)
     with torch.no_grad():
         for idx in range(num_steps):
             t_cur = time_grid[idx].expand(num_samples)
             dt = time_grid[idx] - time_grid[idx + 1]
-            velocity = model(tokens, t_cur)
+            velocity = model(tokens, t_cur, category_index=category_index)
             tokens = tokens - velocity * dt.view(1, 1, 1)
     return tokens
 
 
-def euler_sample_joint(model, num_samples, token_dim, num_steps=50, device="cpu"):
+def euler_sample_joint(model, num_samples, token_dim, num_steps=50, device="cpu", category_index=None):
     """Euler sampler for Phase 2 JointSetTransformerFlowModel.
 
     The model returns ``(v_hat_e, v_hat_z, v_hat)``; we use the concatenated
@@ -35,13 +57,14 @@ def euler_sample_joint(model, num_samples, token_dim, num_steps=50, device="cpu"
         tokens [num_samples, 16, token_dim] – normalized sampled joint tokens
     """
     model.eval()
+    category_index = _normalize_category_index(category_index, num_samples, device)
     tokens = torch.randn(num_samples, PRIMITIVE_COUNT, token_dim, device=device)
     time_grid = torch.linspace(1.0, 0.0, steps=num_steps + 1, device=device)
     with torch.no_grad():
         for idx in range(num_steps):
             t_cur = time_grid[idx].expand(num_samples)
             dt = time_grid[idx] - time_grid[idx + 1]
-            _, _, v_hat = model(tokens, t_cur)
+            _, _, v_hat = model(tokens, t_cur, category_index=category_index)
             tokens = tokens - v_hat * dt.view(1, 1, 1)
     return tokens
 
@@ -108,9 +131,19 @@ def sample_scaffolds(
     num_steps=50,
     exist_threshold=0.5,
     device="cpu",
+    category_index=None,
 ):
-    tokens = euler_sample(model, num_samples=num_samples, token_dim=token_dim, num_steps=num_steps, device=device)
+    tokens = euler_sample(
+        model,
+        num_samples=num_samples,
+        token_dim=token_dim,
+        num_steps=num_steps,
+        device=device,
+        category_index=category_index,
+    )
     processed = postprocess_tokens(tokens, stats=stats, exist_threshold=exist_threshold)
+    if category_index is not None:
+        processed["category_index"] = _normalize_category_index(category_index, num_samples, device).detach().cpu()
     preview_points = render_scaffold_preview(processed)
     processed["preview_points"] = preview_points
     return processed
@@ -161,6 +194,7 @@ def sample_joint_scaffolds(
     exist_threshold=0.5,
     explicit_dim=TOKEN_DIM,
     device="cpu",
+    category_index=None,
 ):
     """Sample from a Phase 2 JointSetTransformerFlowModel.
 
@@ -184,6 +218,7 @@ def sample_joint_scaffolds(
         token_dim=token_dim,
         num_steps=num_steps,
         device=device,
+        category_index=category_index,
     )
     processed = postprocess_joint_tokens(
         tokens,
@@ -191,6 +226,8 @@ def sample_joint_scaffolds(
         explicit_dim=explicit_dim,
         exist_threshold=exist_threshold,
     )
+    if category_index is not None:
+        processed["category_index"] = _normalize_category_index(category_index, num_samples, device).detach().cpu()
     preview_points = render_scaffold_preview(processed)
     processed["preview_points"] = preview_points
     return processed

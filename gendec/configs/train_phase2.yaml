@@ -8,6 +8,10 @@ dataset:
   root: gendec/data/ShapeNetPhase2
   split: train
   val_split: val
+conditioning:
+  enabled: false
+  num_classes: null
+  class_embed_dim: null
 model:
   explicit_dim: 15
   residual_dim: 64

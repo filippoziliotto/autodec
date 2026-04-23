@@ -2,7 +2,12 @@
 
 This document describes the exact Phase 1 `gendec/` model implemented in this repository as of April 23, 2026.
 
-The Phase 1 system is an unconditional generative model over ordered superquadric scaffold tokens. It does not reconstruct point clouds directly. It learns a velocity field in token space and is trained with flow matching.
+The Phase 1 system is a generative model over ordered superquadric scaffold tokens. It does not reconstruct point clouds directly. It learns a velocity field in token space and is trained with flow matching.
+
+It supports two runtime modes:
+
+- unconditional generation
+- optional class-conditioned generation, enabled only when `conditioning.enabled=true` and `num_classes > 1`
 
 The primary code paths are:
 
@@ -23,7 +28,7 @@ The primary code paths are:
 
 The model learns a map
 
-`(E_t, t) -> v_theta(E_t, t)`
+`(E_t, t, c) -> v_theta(E_t, t, c)`
 
 where:
 
@@ -32,10 +37,11 @@ where:
 - `E_t = (1 - t) * E_0 + t * E_1`
 - `v_target = E_1 - E_0`
 - `v_theta` is the neural network prediction
+- `c` is an optional discrete class id
 
 Training minimizes mean squared error between the predicted velocity and the analytic target velocity, with an optional auxiliary existence loss.
 
-At sampling time the model starts from Gaussian noise at `t = 1` and numerically integrates back to `t = 0`.
+At sampling time the model starts from Gaussian noise at `t = 1` and numerically integrates back to `t = 0`. In conditioned runs, the same class id is provided at every Euler step.
 
 ## 2. Token Contract
 
@@ -85,6 +91,8 @@ The payload keys are:
 - `volume`: `[16]`
 - `category_id`: `str`
 - `model_id`: `str`
+
+The serialized file does not store `category_index` directly. That integer id is resolved by the dataset loader from the category folder names.
 
 Dataset-level normalization is saved at:
 
@@ -240,6 +248,12 @@ The resulting dataset index is a list of dicts with:
 - `model_id`
 - `path`
 
+The dataset also builds a stable category vocabulary:
+
+- `category_ids`: sorted list of visible category ids
+- `category_to_index`: `category_id -> integer index`
+- `num_classes`: size of that vocabulary
+
 ### 5.2 Returned sample
 
 `__getitem__` loads one teacher example and returns:
@@ -253,6 +267,7 @@ The resulting dataset index is a list of dicts with:
 - `token_mean`: `[15]`
 - `token_std`: `[15]`
 - `category_id`: string
+- `category_index`: scalar integer tensor
 - `model_id`: string
 
 Normalization is channelwise:
@@ -305,6 +320,7 @@ Inputs:
 
 - `et`: `[B, 16, 15]`
 - `t`: `[B]`
+- `category_index`: optional `[B]`
 
 Output:
 
@@ -370,6 +386,17 @@ Conditioned token state:
 Output shape remains:
 
 - `[B, 16, H]`
+
+If class conditioning is active, the model also resolves:
+
+- `class_hidden = Embedding(category_index)`: `[B, H]`
+
+and adds it to both:
+
+- primitive token states `[B, 16, H]`
+- the learned global token `[B, 1, H]`
+
+If conditioning is disabled or `num_classes <= 1`, this branch is skipped entirely.
 
 ### 7.5 Submodule: GlobalToken
 

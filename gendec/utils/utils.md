@@ -39,10 +39,10 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
 - `GeneratedSQVisualizationRecord`: dataclass describing one saved generated-sample visualization folder.
 - `GeneratedSQVisualizer`:
   - `__init__(root_dir="data/viz", run_name="gendec_eval", mesh_resolution=24, exist_threshold=0.5, max_preview_points=4096)`: stores visualization output settings.
-  - `_sample_dir(split, sample_index)`: returns the per-generated-sample directory under `data/viz/<run_name>/<split>/`.
-  - `_write_metadata(path, split, sample_index, preview_points, active_primitives, decoded_points=None)`: writes summary metadata for one generated SQ and optionally records the decoded-point count when a frozen AutoDec reconstruction is available.
+  - `_sample_dir(split, sample_index, category_label=None)`: returns the per-generated-sample directory under `data/viz/<run_name>/<split>/`, optionally nested by class label.
+  - `_write_metadata(path, split, sample_index, preview_points, active_primitives, decoded_points=None, category_label=None)`: writes summary metadata for one generated SQ and optionally records the category id and decoded-point count when a frozen AutoDec reconstruction is available.
   - `_export_sq_mesh(path, processed, sample_index)`: writes the generated active SQ scaffold mesh as OBJ plus MTL.
-  - `write_generated(processed, split="test", num_samples=10, decoded_points=None)`: writes `sq_mesh.obj`, `preview_points.ply`, `metadata.json`, and, when `decoded_points` is provided, `decoded_points.ply` for generated samples. `decoded_points` may be either a dense tensor or a per-sample list of already-pruned point clouds.
+  - `write_generated(processed, split="test", num_samples=10, decoded_points=None, category_labels=None)`: writes `sq_mesh.obj`, `preview_points.ply`, `metadata.json`, and, when `decoded_points` is provided, `decoded_points.ply` for generated samples. `decoded_points` may be either a dense tensor or a per-sample list of already-pruned point clouds. When `category_labels` is provided, samples are grouped under per-class subfolders and numbered locally within each class.
 - `write_point_cloud_ply(path, points, color=(210, 210, 210), max_points=None)`: writes a preview point cloud PLY file.
 
 ### `preview_video.py`

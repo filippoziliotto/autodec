@@ -8,10 +8,11 @@ def _cfg(root, checkpoint_path, output_dir, autodec_decode=None):
         run_name="gendec_eval_debug",
         dataset=SimpleNamespace(root=str(root), split="test"),
         model=SimpleNamespace(token_dim=15, hidden_dim=32, n_blocks=2, n_heads=4, dropout=0.0),
+        conditioning=SimpleNamespace(enabled=False, num_classes=None, class_embed_dim=None),
         loss=SimpleNamespace(lambda_exist=0.05, exist_channel=-1),
         optimizer=SimpleNamespace(lr=1e-3, weight_decay=0.0, betas=(0.9, 0.999)),
         trainer=SimpleNamespace(batch_size=2, num_workers=0, num_epochs=1, checkpoint_path=str(checkpoint_path)),
-        eval=SimpleNamespace(batch_size=2, output_dir=str(output_dir), generated_num_samples=2, num_steps=4),
+        eval=SimpleNamespace(batch_size=2, output_dir=str(output_dir), generated_num_samples=2, generated_per_class=5, num_steps=4),
         visualization=SimpleNamespace(
             enabled=True,
             root_dir=str(output_dir / "viz"),
@@ -30,10 +31,11 @@ def _cfg_phase2(root, checkpoint_path, output_dir, residual_dim=4, autodec_decod
         run_name="gendec_phase2_eval_debug",
         dataset=SimpleNamespace(root=str(root), split="test"),
         model=SimpleNamespace(explicit_dim=15, residual_dim=residual_dim, hidden_dim=32, n_blocks=2, n_heads=4, dropout=0.0),
+        conditioning=SimpleNamespace(enabled=False, num_classes=None, class_embed_dim=None),
         loss=SimpleNamespace(explicit_dim=15, lambda_e=1.0, lambda_z=1.0, lambda_exist=0.05, exist_channel=-1),
         optimizer=SimpleNamespace(lr=1e-3, weight_decay=0.0, betas=(0.9, 0.999)),
         trainer=SimpleNamespace(batch_size=2, num_workers=0, num_epochs=1, checkpoint_path=str(checkpoint_path)),
-        eval=SimpleNamespace(batch_size=2, output_dir=str(output_dir), generated_num_samples=2, num_steps=4),
+        eval=SimpleNamespace(batch_size=2, output_dir=str(output_dir), generated_num_samples=2, generated_per_class=5, num_steps=4),
         visualization=SimpleNamespace(
             enabled=True,
             root_dir=str(output_dir / "viz"),
@@ -178,3 +180,61 @@ def test_phase2_evaluator_writes_decoded_point_cloud_visualizations(tmp_path):
     assert (sample_dirs[0] / "sq_mesh.obj").is_file()
     assert (sample_dirs[0] / "preview_points.ply").is_file()
     assert (sample_dirs[0] / "decoded_points.ply").is_file()
+
+
+def test_phase1_conditioned_test_eval_generates_five_samples_per_class(tmp_path):
+    from gendec.eval.evaluator import Phase1Evaluator
+    from gendec.tests.test_conditioning import _write_multicat_phase1_root
+    from gendec.training.builders import build_dataset, build_loss, build_model
+    from gendec.training.checkpoints import save_phase1_checkpoint
+
+    root = tmp_path / "ShapeNet"
+    checkpoint_path = tmp_path / "phase1.pt"
+    output_dir = tmp_path / "eval"
+    _write_multicat_phase1_root(root, {"train": 2, "test": 1})
+    cfg = _cfg(root, checkpoint_path, output_dir)
+    cfg.conditioning = SimpleNamespace(enabled=True, num_classes=None, class_embed_dim=None)
+
+    model = build_model(cfg)
+    save_phase1_checkpoint(model, optimizer=None, scheduler=None, epoch=0, loss=0.0, path=checkpoint_path)
+    loss_fn = build_loss(cfg)
+    dataset = build_dataset(cfg)
+
+    evaluator = Phase1Evaluator(cfg=cfg, model=model, loss_fn=loss_fn, dataset=dataset)
+    evaluator.evaluate()
+
+    viz_root = output_dir / "viz" / "gendec_eval_debug" / "test"
+    airplane_dirs = sorted((viz_root / "02691156").glob("generated_*"))
+    chair_dirs = sorted((viz_root / "03001627").glob("generated_*"))
+
+    assert len(airplane_dirs) == 5
+    assert len(chair_dirs) == 5
+
+
+def test_phase2_conditioned_test_eval_generates_five_samples_per_class(tmp_path):
+    from gendec.eval.evaluator import Phase2Evaluator
+    from gendec.tests.test_conditioning import _write_multicat_phase2_root
+    from gendec.training.builders import build_phase2_dataset, build_phase2_loss, build_phase2_model
+    from gendec.training.checkpoints import save_phase1_checkpoint
+
+    root = tmp_path / "ShapeNetPhase2"
+    checkpoint_path = tmp_path / "phase2.pt"
+    output_dir = tmp_path / "eval"
+    _write_multicat_phase2_root(root, {"train": 2, "test": 1}, residual_dim=4)
+    cfg = _cfg_phase2(root, checkpoint_path, output_dir, residual_dim=4)
+    cfg.conditioning = SimpleNamespace(enabled=True, num_classes=None, class_embed_dim=None)
+
+    model = build_phase2_model(cfg)
+    save_phase1_checkpoint(model, optimizer=None, scheduler=None, epoch=0, loss=0.0, path=checkpoint_path)
+    loss_fn = build_phase2_loss(cfg)
+    dataset = build_phase2_dataset(cfg)
+
+    evaluator = Phase2Evaluator(cfg=cfg, model=model, loss_fn=loss_fn, dataset=dataset)
+    evaluator.evaluate()
+
+    viz_root = output_dir / "viz" / "gendec_phase2_eval_debug" / "test"
+    airplane_dirs = sorted((viz_root / "02691156").glob("generated_*"))
+    chair_dirs = sorted((viz_root / "03001627").glob("generated_*"))
+
+    assert len(airplane_dirs) == 5
+    assert len(chair_dirs) == 5
