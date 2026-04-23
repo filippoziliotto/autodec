@@ -1,0 +1,13 @@
+{
+  "metrics": {
+    "all": 1.6918184757232666,
+    "exist_loss": 0.7599835991859436,
+    "flow_loss": 1.6538193225860596,
+    "generated_active_primitive_count": 8.5,
+    "generated_token_mean_abs": 0.4693093001842499,
+    "num_rows": 8
+  },
+  "num_samples": 8,
+  "run_name": "gendec_eval",
+  "split": "test"
+}

@@ -1,0 +1,8 @@
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.4471372365951538, "exist_loss": 0.7411031723022461, "flow_loss": 1.4100821018218994}, "model_id": "toy_test_0000", "sample_index": 0}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.4622926712036133, "exist_loss": 0.7573644518852234, "flow_loss": 1.424424409866333}, "model_id": "toy_test_0001", "sample_index": 1}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.9893364906311035, "exist_loss": 1.6224253177642822, "flow_loss": 1.9082151651382446}, "model_id": "toy_test_0002", "sample_index": 2}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 2.0460963249206543, "exist_loss": 1.7807730436325073, "flow_loss": 1.9570577144622803}, "model_id": "toy_test_0003", "sample_index": 3}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.5050253868103027, "exist_loss": 0.12671039998531342, "flow_loss": 1.498689889907837}, "model_id": "toy_test_0004", "sample_index": 4}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.7005257606506348, "exist_loss": 0.9441327452659607, "flow_loss": 1.6533191204071045}, "model_id": "toy_test_0005", "sample_index": 5}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.7926218509674072, "exist_loss": 0.05012497678399086, "flow_loss": 1.7901155948638916}, "model_id": "toy_test_0006", "sample_index": 6}
+{"batch_index": 0, "category_id": "03001627", "metrics": {"all": 1.5915123224258423, "exist_loss": 0.05723483860492706, "flow_loss": 1.5886505842208862}, "model_id": "toy_test_0007", "sample_index": 7}
