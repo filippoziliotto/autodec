@@ -19,6 +19,7 @@ When any config file changes, this file must be updated to reflect the new purpo
 - `checkpoints.resume_from`: checkpoint path to load, defaulting to the validation-best Phase 1 checkpoint.
 - `eval`: batch size, generated sample count, and output directory.
 - `sampling`: evaluation-time Euler steps and existence threshold used for unconditional sampling during evaluation.
+- `visualization`: writes 10 generated SQ visualizations under `data/viz/<run_name>/test/` by default, including `sq_mesh.obj`, `preview_points.ply`, and metadata.
 - `autodec_decode`: optional eval-only bridge into a frozen AutoDec decoder for zero-residual coarse-generation plausibility metrics.
 
 ### `eval_val.yaml`
@@ -26,12 +27,14 @@ When any config file changes, this file must be updated to reflect the new purpo
 - Validation evaluation preset.
 - Inherits `eval.yaml`, but switches `dataset.split` to `val`.
 - Used by the checked-in validation script so held-out validation and final test runs stay separate.
+- Disables generated-SQ visualization writing so the `data/viz/` export is specific to test evaluation.
 
 ### `eval_test.yaml`
 
 - Lightweight evaluation preset for smoke-verified small checkpoints.
 - Same structure as `eval.yaml`, but uses the small smoke model (`hidden_dim=32`, `n_blocks=2`, `n_heads=4`) and the smoke checkpoint path.
 - Also includes a disabled `autodec_decode` block so the eval code path is configurable in smoke-style environments.
+- Keeps visualization writing enabled, but lowers mesh resolution and preview point count for faster smoke execution.
 
 ### `sample.yaml`
 

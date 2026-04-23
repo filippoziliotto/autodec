@@ -81,3 +81,10 @@ If training construction, checkpoint semantics, or metric logging behavior chang
   - `_eval_model()`: chooses EMA weights when available for validation and sampling diagnostics.
   - `_sample_metrics(epoch)`: runs unconditional sampling, computes active-count and validity metrics, and writes scaffold preview artifacts on schedule.
   - `train()`: iterates epochs, performs train and val passes, logs unconditional sample diagnostics, saves last/best checkpoints, appends structured epoch rows, and mirrors epoch metrics to WandB when enabled.
+
+The trainer now also:
+
+- wraps train and val dataloaders in `tqdm` progress bars by default
+- updates the progress postfix with the latest batch metrics
+- prints a readable end-of-epoch summary covering `train`, `val`, and `samples`
+- respects `training.disable_tqdm` when you want quiet console output

@@ -14,6 +14,12 @@ If a new top-level test file is added here, or an existing test changes scope, t
 
 - `test_phase1_checkpoint_round_trip_restores_model_and_epoch`: verifies that saved checkpoints restore model weights and return stored epoch/loss metadata.
 
+### `test_console_logger.py`
+
+- `test_console_logger_formats_metric_map`: verifies metric dictionaries are rendered into stable console text.
+- `_cfg(data_root, checkpoint_path, sample_dir)`: builds a small namespace config with tqdm disabled for console-output tests.
+- `test_run_train_prints_epoch_metrics`: verifies the train entrypoint prints the end-of-epoch train/val/sample summary.
+
 ### `test_dataset.py`
 
 - `test_toy_teacher_dataset_round_trips_schema_and_normalization`: checks that toy exports load through `ScaffoldTokenDataset` with the expected schema and normalized token fields.
@@ -76,4 +82,4 @@ If a new top-level test file is added here, or an existing test changes scope, t
 
 ## Subfolder
 
-- [`eval/eval.md`](./eval/eval.md): evaluation-specific tests, including the frozen AutoDec coarse-decode bridge.
+- [`eval/eval.md`](./eval/eval.md): evaluation-specific tests, including the frozen AutoDec coarse-decode bridge and generated-SQ visualization artifacts.

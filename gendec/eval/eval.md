@@ -41,7 +41,7 @@ If evaluation metrics, outputs, or checkpoint-loading behavior change, this file
   - `_write_jsonl(path, rows)`: writes per-sample JSONL rows.
   - `_autodec_decode_enabled()`: reports whether the frozen AutoDec eval branch is enabled.
   - `_get_frozen_autodec_decoder()`: lazily builds and caches the frozen AutoDec decoder bridge.
-  - `evaluate()`: runs held-out loss evaluation, aggregates metrics, writes `metrics.json`, writes per-sample rows, writes `generated_samples.pt` from unconditional sampling, and optionally writes `generated_autodec_samples.pt` plus coarse plausibility metrics from the frozen AutoDec decoder.
+  - `evaluate()`: runs held-out loss evaluation, aggregates metrics, writes `metrics.json`, writes per-sample rows, writes `generated_samples.pt` from unconditional sampling, writes 10 generated SQ visualization folders under `data/viz/<run_name>/test/` when test visualization is enabled, and optionally writes `generated_autodec_samples.pt` plus coarse plausibility metrics from the frozen AutoDec decoder.
   - Evaluation-time unconditional generation now prefers `sampling.eval_steps` and `sampling.exist_threshold` when explicit `eval` overrides are absent, so training, sampling, and evaluation can share one sampling policy.
 
 ### `metrics.py`

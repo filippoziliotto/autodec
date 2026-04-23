@@ -899,7 +899,15 @@ Training-time unconditional sampling diagnostics include:
 6. write `metrics.json`
 7. write `per_sample_metrics.jsonl`
 8. write `generated_samples.pt`
-9. optionally write `generated_autodec_samples.pt`
+9. on test runs, write 10 generated SQ visualization folders under `data/viz/<run_name>/test/`
+10. optionally write `generated_autodec_samples.pt`
+
+Each generated visualization folder contains:
+
+- `sq_mesh.obj`
+- `sq_mesh.mtl`
+- `preview_points.ply`
+- `metadata.json`
 
 ## 13. Extension Points
 

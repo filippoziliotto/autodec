@@ -15,6 +15,7 @@ from gendec.training.runtime_metrics import (
     teacher_active_count_metrics,
 )
 from gendec.training.checkpoints import save_phase1_checkpoint
+from gendec.utils.logger import TrainingConsoleLogger
 
 
 class Phase1Trainer:
@@ -49,6 +50,9 @@ class Phase1Trainer:
             checkpoint_path = Path(cfg_get(self.training_cfg, "checkpoint_path"))
             metrics_path = checkpoint_path.with_suffix(".jsonl")
         self.metric_logger = EpochMetricLogger(metrics_path, append=False)
+        self.console_logger = TrainingConsoleLogger(
+            disable_tqdm=bool(cfg_get(self.training_cfg, "disable_tqdm", False))
+        )
 
         self.use_amp = bool(cfg_get(self.training_cfg, "amp", False)) and self.device.type == "cuda"
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
@@ -83,7 +87,12 @@ class Phase1Trainer:
         averager = MetricAverager()
         self.model.train(mode=train_mode)
 
-        for batch in loader:
+        progress = self.console_logger.progress_bar(
+            loader,
+            desc="Train" if train_mode else "Val",
+            leave=False,
+        )
+        for batch in progress:
             batch = self._move_batch(batch)
             flow_batch = self._flow_batch(batch)
             batch_size = int(batch["tokens_e"].shape[0])
@@ -105,7 +114,9 @@ class Phase1Trainer:
                 if self.ema is not None:
                     self.ema.update(self.model)
 
-            averager.update(self._batch_metrics(batch, flow_batch, v_hat, loss_metrics), batch_size=batch_size)
+            batch_metrics = self._batch_metrics(batch, flow_batch, v_hat, loss_metrics)
+            averager.update(batch_metrics, batch_size=batch_size)
+            self.console_logger.update_progress_postfix(progress, batch_metrics)
 
         return averager.compute()
 
@@ -210,6 +221,13 @@ class Phase1Trainer:
                 }
                 if payload:
                     self.wandb_run.log(payload, step=epoch)
+            self.console_logger.print_epoch_summary(
+                epoch=epoch,
+                num_epochs=num_epochs,
+                train_metrics=train_metrics,
+                val_metrics=val_metrics,
+                sample_metrics=sample_metrics,
+            )
 
             last_result = {
                 "epoch": epoch,

@@ -15,6 +15,7 @@ from gendec.eval.metrics import (
 from gendec.losses.path import build_flow_batch
 from gendec.sampling import sample_scaffolds
 from gendec.training.builders import cfg_get
+from gendec.utils.visualization import GeneratedSQVisualizer
 
 
 def _batch_size(batch):
@@ -75,6 +76,41 @@ class Phase1Evaluator:
         )
         return self._frozen_autodec_decoder
 
+    def _write_generated_visualizations(self, generated):
+        vis_cfg = cfg_get(self.cfg, "visualization")
+        if not cfg_get(vis_cfg, "enabled", True):
+            return []
+        if self.split != "test":
+            return []
+        visualizer = GeneratedSQVisualizer(
+            root_dir=cfg_get(vis_cfg, "root_dir", "data/viz"),
+            run_name=cfg_get(self.cfg, "run_name", "gendec_eval"),
+            mesh_resolution=cfg_get(vis_cfg, "mesh_resolution", 24),
+            exist_threshold=cfg_get(vis_cfg, "exist_threshold", 0.5),
+            max_preview_points=cfg_get(vis_cfg, "max_preview_points", 4096),
+        )
+        return visualizer.write_generated(
+            generated,
+            split=self.split,
+            num_samples=cfg_get(vis_cfg, "generated_num_samples", 10),
+        )
+
+    def _sample_generated(self, num_samples):
+        sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
+        return sample_scaffolds(
+            model=self.model,
+            stats=self.dataset.stats,
+            num_samples=int(num_samples),
+            token_dim=cfg_get(cfg_get(self.cfg, "model"), "token_dim", 15),
+            num_steps=cfg_get(cfg_get(self.cfg, "eval"), "num_steps", cfg_get(sampling_cfg, "eval_steps", 100)),
+            exist_threshold=cfg_get(
+                cfg_get(self.cfg, "eval"),
+                "exist_threshold",
+                cfg_get(sampling_cfg, "exist_threshold", 0.5),
+            ),
+            device=self.device,
+        )
+
     def evaluate(self):
         self.model.to(self.device)
         self.model.eval()
@@ -83,7 +119,6 @@ class Phase1Evaluator:
         total_samples = 0
         reference_points = []
         reference_limit = int(cfg_get(self.autodec_decode_cfg, "reference_limit", 32))
-        sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
 
         with torch.no_grad():
             for batch_index, batch in enumerate(self._loader()):
@@ -119,19 +154,7 @@ class Phase1Evaluator:
                         }
                     )
 
-            generated = sample_scaffolds(
-                model=self.model,
-                stats=self.dataset.stats,
-                num_samples=cfg_get(cfg_get(self.cfg, "eval"), "generated_num_samples", 4),
-                token_dim=cfg_get(cfg_get(self.cfg, "model"), "token_dim", 15),
-                num_steps=cfg_get(cfg_get(self.cfg, "eval"), "num_steps", cfg_get(sampling_cfg, "eval_steps", 100)),
-                exist_threshold=cfg_get(
-                    cfg_get(self.cfg, "eval"),
-                    "exist_threshold",
-                    cfg_get(sampling_cfg, "exist_threshold", 0.5),
-                ),
-                device=self.device,
-            )
+            generated = self._sample_generated(cfg_get(cfg_get(self.cfg, "eval"), "generated_num_samples", 4))
 
         metrics = averager.compute()
         metrics["generated_active_primitive_count"] = float(
@@ -200,4 +223,12 @@ class Phase1Evaluator:
                 },
                 self.output_dir / cfg_get(self.autodec_decode_cfg, "output_filename", "generated_autodec_samples.pt"),
             )
+        vis_cfg = cfg_get(self.cfg, "visualization")
+        vis_num_samples = int(cfg_get(vis_cfg, "generated_num_samples", 10))
+        visualization_generated = generated
+        if cfg_get(vis_cfg, "enabled", True) and self.split == "test" and vis_num_samples > int(generated["tokens"].shape[0]):
+            with torch.no_grad():
+                visualization_generated = self._sample_generated(vis_num_samples)
+        visualization_records = self._write_generated_visualizations(visualization_generated)
+        payload["num_visualizations"] = len(visualization_records)
         return payload

@@ -12,6 +12,14 @@ def _cfg(root, checkpoint_path, output_dir, autodec_decode=None):
         optimizer=SimpleNamespace(lr=1e-3, weight_decay=0.0, betas=(0.9, 0.999)),
         trainer=SimpleNamespace(batch_size=2, num_workers=0, num_epochs=1, checkpoint_path=str(checkpoint_path)),
         eval=SimpleNamespace(batch_size=2, output_dir=str(output_dir), generated_num_samples=2, num_steps=4),
+        visualization=SimpleNamespace(
+            enabled=True,
+            root_dir=str(output_dir / "viz"),
+            generated_num_samples=10,
+            mesh_resolution=8,
+            exist_threshold=0.5,
+            max_preview_points=128,
+        ),
         autodec_decode=autodec_decode,
     )
 
@@ -47,6 +55,13 @@ def test_phase1_evaluator_writes_metrics_and_per_sample_rows(tmp_path):
     assert metrics["num_samples"] == 3
     assert "generated_active_primitive_count" in metrics["metrics"]
     assert result["metrics"]["num_rows"] == 3
+
+    viz_root = output_dir / "viz" / "gendec_eval_debug" / "test"
+    sample_dirs = sorted(viz_root.glob("generated_*"))
+    assert len(sample_dirs) == 10
+    assert (sample_dirs[0] / "sq_mesh.obj").is_file()
+    assert (sample_dirs[0] / "preview_points.ply").is_file()
+    assert (sample_dirs[0] / "metadata.json").is_file()
 
 
 def test_phase1_evaluator_can_decode_generated_scaffolds_with_frozen_autodec_decoder(tmp_path):

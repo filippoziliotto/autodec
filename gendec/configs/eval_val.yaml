@@ -6,3 +6,6 @@ dataset:
   split: val
 
 run_name: gendec_eval_val
+
+visualization:
+  enabled: false

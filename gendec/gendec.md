@@ -10,6 +10,7 @@
 - training, sampling, and evaluation entrypoints
 - shell scripts for export, training, validation evaluation, and test evaluation
 - optional eval-only coarse decoding of sampled scaffolds through a frozen AutoDec decoder with zero residual latents
+- generated-SQ visualization exports for test evaluation under `data/viz/`
 - package-level documentation and tests
 
 ## Maintenance Contract
@@ -85,3 +86,4 @@ When code or configs in a documented folder change, the matching folder markdown
 - [`scripts/scripts.md`](./scripts/scripts.md): checked-in shell scripts for export, training, and eval.
 - [`tests/tests.md`](./tests/tests.md): test coverage overview.
 - [`training/training.md`](./training/training.md): builders, checkpoints, logging, and trainer loop.
+- [`utils/utils.md`](./utils/utils.md): small shared runtime helpers such as console logging.

@@ -15,6 +15,7 @@ def test_source_directories_have_matching_folder_docs():
         root / "tests" / "tests.md",
         root / "tests" / "eval" / "eval.md",
         root / "training" / "training.md",
+        root / "utils" / "utils.md",
     ]
 
     missing = [str(path) for path in expected if not path.is_file()]
