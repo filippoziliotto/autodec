@@ -1,0 +1,8 @@
+defaults:
+  - eval
+  - _self_
+
+dataset:
+  split: val
+
+run_name: gendec_eval_val

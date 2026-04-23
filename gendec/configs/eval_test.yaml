@@ -1,0 +1,33 @@
+seed: 0
+run_name: gendec_eval
+dataset:
+  root: gendec/data/ShapeNet
+  split: test
+model:
+  token_dim: 15
+  hidden_dim: 32
+  n_blocks: 2
+  n_heads: 4
+  dropout: 0.0
+loss:
+  lambda_flow: 1.0
+  lambda_exist: 0.05
+  exist_channel: -1
+checkpoints:
+  resume_from: gendec/data/checkpoints/smoke_best.pt
+eval:
+  batch_size: 8
+  generated_num_samples: 4
+  output_dir: gendec/data/eval
+sampling:
+  preview_steps: 4
+  eval_steps: 4
+  exist_threshold: 0.5
+autodec_decode:
+  enabled: false
+  config_path: autodec/configs/eval_test.yaml
+  checkpoint_path: checkpoints/autodec_phase2/best.pt
+  reference_limit: 16
+  point_count: 256
+  f_score_threshold: 0.01
+  output_filename: generated_autodec_samples.pt

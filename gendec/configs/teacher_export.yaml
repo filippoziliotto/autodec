@@ -1,0 +1,10 @@
+export:
+  mode: real
+  output_root: gendec/data/ShapeNet
+  dataset_path: data/ShapeNet
+  splits: [train, val, test]
+  category_id: "03001627"
+  teacher_config: checkpoints/shapenet/config.yaml
+  teacher_checkpoint: checkpoints/shapenet/ckpt.pt
+  num_points: 4096
+  max_items: null

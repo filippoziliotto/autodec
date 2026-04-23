@@ -1,0 +1,48 @@
+seed: 0
+run_name: gendec_phase1
+use_wandb: true
+wandb:
+  project: gendec
+  api_key_env: WANDB_API_KEY
+dataset:
+  root: gendec/data/ShapeNet
+  split: train
+  val_split: val
+model:
+  token_dim: 15
+  hidden_dim: 256
+  n_blocks: 6
+  n_heads: 8
+  dropout: 0.0
+loss:
+  lambda_flow: 1.0
+  lambda_exist: 0.05
+  exist_channel: -1
+optimizer:
+  name: AdamW
+  lr: 0.0002
+  weight_decay: 0.01
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+scheduler:
+  name: cosine
+  warmup_steps: 2000
+  min_lr: 1.0e-5
+training:
+  batch_size: 128
+  num_workers: 0
+  num_epochs: 300
+  grad_clip_norm: 1.0
+  ema_decay: 0.999
+  amp: true
+  checkpoint_path: gendec/data/checkpoints/phase1_last.pt
+  best_checkpoint_path: gendec/data/checkpoints/phase1_best.pt
+  metrics_path: gendec/data/checkpoints/phase1_metrics.jsonl
+  preview_every: 1
+  preview_dir: gendec/data/previews
+sampling:
+  preview_num_samples: 8
+  preview_steps: 50
+  eval_steps: 100
+  exist_threshold: 0.5
+  output_dir: gendec/data/samples

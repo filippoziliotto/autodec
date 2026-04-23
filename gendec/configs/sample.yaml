@@ -1,0 +1,18 @@
+dataset:
+  root: gendec/data/ShapeNet
+  split: train
+model:
+  token_dim: 15
+  hidden_dim: 256
+  n_blocks: 6
+  n_heads: 8
+  dropout: 0.0
+trainer:
+training:
+  best_checkpoint_path: gendec/data/checkpoints/phase1_best.pt
+sampling:
+  num_samples: 4
+  preview_steps: 50
+  eval_steps: 100
+  exist_threshold: 0.5
+  output_dir: gendec/data/samples

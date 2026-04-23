@@ -1,0 +1,54 @@
+seed: 0
+use_wandb: false
+wandb:
+  project: gendec
+  api_key_env: WANDB_API_KEY
+export:
+  mode: toy
+  output_root: gendec/data/ShapeNet
+  splits: [train, val, test]
+  num_examples: 4
+  num_points: 64
+dataset:
+  root: gendec/data/ShapeNet
+  split: train
+  val_split: val
+model:
+  token_dim: 15
+  hidden_dim: 32
+  n_blocks: 2
+  n_heads: 4
+  dropout: 0.0
+loss:
+  lambda_flow: 1.0
+  lambda_exist: 0.05
+  exist_channel: -1
+optimizer:
+  name: AdamW
+  lr: 0.001
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+scheduler:
+  name: cosine
+  warmup_steps: 0
+  min_lr: 1.0e-5
+training:
+  batch_size: 2
+  num_workers: 0
+  num_epochs: 1
+  grad_clip_norm: 1.0
+  ema_decay: 0.999
+  amp: false
+  checkpoint_path: gendec/data/checkpoints/smoke.pt
+  best_checkpoint_path: gendec/data/checkpoints/smoke_best.pt
+  metrics_path: gendec/data/checkpoints/smoke_metrics.jsonl
+  preview_every: 1
+  preview_dir: gendec/data/smoke_previews
+sampling:
+  num_samples: 2
+  preview_num_samples: 2
+  preview_steps: 4
+  eval_steps: 4
+  exist_threshold: 0.5
+  output_dir: gendec/data/smoke_samples

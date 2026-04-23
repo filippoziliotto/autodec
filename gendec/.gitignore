@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+data/checkpoints/
+data/samples/
+data/smoke_samples/
+data/ShapeNet/

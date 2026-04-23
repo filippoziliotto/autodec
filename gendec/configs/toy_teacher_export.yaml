@@ -1,0 +1,6 @@
+export:
+  mode: toy
+  output_root: gendec/data/ShapeNet
+  splits: [train, val, test]
+  num_examples: 8
+  num_points: 4096
