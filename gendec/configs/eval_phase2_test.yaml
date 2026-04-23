@@ -1,0 +1,43 @@
+seed: 0
+run_name: gendec_phase2_eval
+dataset:
+  root: gendec/data/ShapeNetPhase2
+  split: test
+model:
+  explicit_dim: 15
+  residual_dim: 64
+  hidden_dim: 32
+  n_blocks: 2
+  n_heads: 4
+  dropout: 0.0
+loss:
+  explicit_dim: 15
+  lambda_e: 1.0
+  lambda_z: 1.0
+  lambda_exist: 0.05
+  exist_channel: -1
+checkpoints:
+  resume_from: gendec/data/checkpoints/phase2_smoke_best.pt
+eval:
+  batch_size: 8
+  generated_num_samples: 4
+  output_dir: gendec/data/eval
+sampling:
+  preview_steps: 4
+  eval_steps: 4
+  exist_threshold: 0.5
+visualization:
+  enabled: true
+  root_dir: data/viz
+  generated_num_samples: 10
+  mesh_resolution: 8
+  exist_threshold: 0.5
+  max_preview_points: 256
+autodec_decode:
+  enabled: false
+  config_path: checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/config.yaml
+  checkpoint_path: checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/epoch_200.pt
+  reference_limit: 16
+  point_count: 256
+  f_score_threshold: 0.01
+  output_filename: generated_autodec_samples.pt

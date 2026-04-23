@@ -18,6 +18,13 @@ def _lazy_load_superdec_model():
     return SuperDec
 
 
+def _lazy_load_autodec_model():
+    from autodec.autodec import AutoDec
+    from autodec.utils.checkpoints import load_autodec_checkpoint
+
+    return AutoDec, load_autodec_checkpoint
+
+
 def _resolve_teacher_config_path(export_cfg):
     config_path = cfg_get(export_cfg, "teacher_config")
     if config_path is not None:
@@ -26,7 +33,7 @@ def _resolve_teacher_config_path(export_cfg):
     return checkpoint_path.with_name("config.yaml")
 
 
-def _teacher_model(export_cfg):
+def _superdec_teacher_model(export_cfg):
     try:
         SuperDec = _lazy_load_superdec_model()
     except Exception as exc:
@@ -49,6 +56,59 @@ def _teacher_model(export_cfg):
     state_dict = checkpoint.get("model_state_dict", checkpoint)
     model.load_state_dict(strip_module_prefix(state_dict))
     return model
+
+
+def _autodec_teacher_model(export_cfg):
+    try:
+        AutoDec, load_autodec_checkpoint = _lazy_load_autodec_model()
+    except Exception as exc:
+        raise RuntimeError(
+            "Phase 2 teacher export requires the AutoDec model dependencies "
+            "to be installed locally."
+        ) from exc
+
+    teacher_cfg_path = _resolve_teacher_config_path(export_cfg)
+    checkpoint_path = Path(cfg_get(export_cfg, "teacher_checkpoint"))
+    if not teacher_cfg_path.is_file():
+        raise FileNotFoundError(f"Teacher config not found: {teacher_cfg_path}")
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"Teacher checkpoint not found: {checkpoint_path}")
+
+    teacher_cfg = load_yaml_config(teacher_cfg_path)
+    model_cfg = cfg_get(teacher_cfg, "autodec", teacher_cfg)
+    model = AutoDec(model_cfg)
+    load_autodec_checkpoint(
+        model,
+        checkpoint_path,
+        map_location="cpu",
+        load_optimizer=False,
+    )
+    return model
+
+
+def _teacher_model(export_cfg):
+    teacher_kind = str(cfg_get(export_cfg, "teacher_kind", "superdec")).lower()
+    if teacher_kind == "superdec":
+        return _superdec_teacher_model(export_cfg)
+    if teacher_kind == "autodec":
+        return _autodec_teacher_model(export_cfg)
+    raise ValueError(f"Unsupported teacher_kind {teacher_kind!r}")
+
+
+def _stats_token_key(export_cfg):
+    teacher_kind = str(cfg_get(export_cfg, "teacher_kind", "superdec")).lower()
+    return "tokens_ez" if teacher_kind == "autodec" else "tokens_e"
+
+
+def _run_teacher_model(model, export_cfg, points, device):
+    teacher_kind = str(cfg_get(export_cfg, "teacher_kind", "superdec")).lower()
+    points = points.unsqueeze(0).to(device=device, dtype=torch.float32)
+    if teacher_kind == "autodec":
+        encoder = getattr(model, "encoder", None)
+        if encoder is None:
+            raise TypeError("AutoDec teacher export requires an encoder on the loaded model.")
+        return encoder(points)
+    return model(points)
 
 
 def _output_stats(root, split, token_examples):
@@ -74,6 +134,7 @@ def _resolved_export_splits(export_cfg):
 def _export_teacher_split(model, device, export_cfg, output_root, categories, split):
     model_index = []
     token_examples = []
+    token_key = _stats_token_key(export_cfg)
     max_items = cfg_get(export_cfg, "max_items")
     num_points = int(cfg_get(export_cfg, "num_points", 4096))
     source_models = scan_source_shapenet_models(
@@ -89,7 +150,7 @@ def _export_teacher_split(model, device, export_cfg, output_root, categories, sp
                 break
 
             points = load_source_pointcloud(item["model_dir"], n_points=num_points)["points"]
-            outdict = model(points.unsqueeze(0).to(device=device, dtype=torch.float32))
+            outdict = _run_teacher_model(model, export_cfg, points, device)
             example = build_teacher_example(
                 {
                     key: value[0].detach().cpu() if torch.is_tensor(value) else value
@@ -100,7 +161,11 @@ def _export_teacher_split(model, device, export_cfg, output_root, categories, sp
                 category_id=item["category_id"],
             )
             save_teacher_example(output_root, example)
-            token_examples.append(example["tokens_e"])
+            if token_key not in example:
+                raise KeyError(
+                    f"Teacher example for {item['category_id']}/{item['model_id']} is missing {token_key!r}."
+                )
+            token_examples.append(example[token_key])
             model_index.append(
                 {
                     "category_id": item["category_id"],
@@ -127,7 +192,8 @@ def export_teacher_dataset(cfg):
         category_id = cfg_get(export_cfg, "category_id")
         categories = None if category_id is None else [category_id]
 
-    output_root = Path(cfg_get(export_cfg, "output_root", "gendec/data/ShapeNet"))
+    default_output_root = "gendec/data/ShapeNetPhase2" if _stats_token_key(export_cfg) == "tokens_ez" else "gendec/data/ShapeNet"
+    output_root = Path(cfg_get(export_cfg, "output_root", default_output_root))
     output_root.mkdir(parents=True, exist_ok=True)
 
     model = _teacher_model(export_cfg)

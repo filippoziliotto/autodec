@@ -2,15 +2,21 @@
 
 ## Purpose
 
-`gendec/` is the Phase 1 generative scaffold package. It owns:
+`gendec/` is the generative scaffold package. It now owns both:
 
-- teacher export from SuperDec outputs into ordered scaffold tokens
+- Phase 1: unconditional scaffold-only generation over explicit SQ tokens `E`
+- Phase 2: unconditional joint generation over AutoDec bottleneck tokens `(E, Z)`
+
+It owns:
+
+- teacher export from frozen SuperDec or AutoDec outputs into ordered scaffold or joint tokens
 - normalized token datasets over ShapeNet-style directory layouts
-- the token-space flow model and loss
-- training, sampling, and evaluation entrypoints
+- token-space flow models and losses for Phase 1 and Phase 2
+- training, sampling, and evaluation entrypoints for both phases
 - shell scripts for export, training, validation evaluation, and test evaluation
 - optional eval-only coarse decoding of sampled scaffolds through a frozen AutoDec decoder with zero residual latents
-- generated-SQ visualization exports for test evaluation under `data/viz/`
+- Phase 2 joint decoding of sampled `(E,Z)` tokens through the frozen AutoDec decoder
+- generated-SQ visualization exports for test evaluation under `data/viz/`, including Phase 2 `decoded_points.ply` reconstructions when frozen AutoDec decoding is enabled
 - preview-video rendering under `gendec/videos/<run_name>/video_000000.mp4`, `video_000001.mp4`, and related per-sample outputs
 - package-level documentation and tests
 
@@ -27,10 +33,11 @@ When code or configs in a documented folder change, the matching folder markdown
 - Re-exports the public package surface.
 - Uses lazy attribute loading so lightweight entrypoints such as teacher export do not import the full eval/runtime stack at module import time.
 - `ScaffoldTokenDataset`: dataset API for normalized scaffold tokens.
-- `Phase1Evaluator`: evaluator API for held-out token-space evaluation.
-- `FlowMatchingLoss`: main training loss.
-- `SetTransformerFlowModel`: Phase 1 neural network.
-- `postprocess_tokens`, `render_scaffold_preview`, `sample_scaffolds`: sampling-side helpers.
+- `JointTokenDataset`: dataset API for normalized joint `(E,Z)` tokens.
+- `Phase1Evaluator`, `Phase2Evaluator`: evaluator APIs for held-out token-space evaluation.
+- `FlowMatchingLoss`, `JointFlowMatchingLoss`: Phase 1 and Phase 2 training losses.
+- `SetTransformerFlowModel`, `JointSetTransformerFlowModel`: Phase 1 and Phase 2 neural networks.
+- `postprocess_tokens`, `postprocess_joint_tokens`, `render_scaffold_preview`, `sample_scaffolds`, `sample_joint_scaffolds`: sampling-side helpers.
 
 ### `config.py`
 
@@ -44,7 +51,7 @@ When code or configs in a documented folder change, the matching folder markdown
 ### `export_teacher.py`
 
 - CLI entrypoint for dataset creation.
-- `run_export(cfg)`: dispatches to toy export or real SuperDec teacher export based on `export.mode`, and can materialize `train`/`val`/`test` in one run.
+- `run_export(cfg)`: dispatches to Phase 1 toy export, Phase 2 toy export, or real teacher export based on `export.mode`.
 - `_main(cfg)`: prints the export result for Hydra or fallback CLI execution.
 
 ### `sample.py`
@@ -75,6 +82,12 @@ When code or configs in a documented folder change, the matching folder markdown
 
 - CLI entrypoint for Phase 1 model training.
 - `run_train(cfg)`: builds train/val dataloaders, model, loss, optimizer, scheduler, optional WandB run, trainer, then runs training with validation and sample-quality logging.
+- `_main(cfg)`: prints the train result payload.
+
+### `train_phase2.py`
+
+- CLI entrypoint for Phase 2 model training.
+- `run_train_phase2(cfg)`: builds joint-token train/val dataloaders, the Phase 2 model/loss, optimizer, scheduler, optional WandB run, optionally restores a prior checkpoint, and runs `Phase2Trainer`.
 - `_main(cfg)`: prints the train result payload.
 
 ## Subfolders

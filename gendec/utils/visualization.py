@@ -34,6 +34,7 @@ class GeneratedSQVisualizationRecord:
     sample_dir: Path
     sq_mesh_path: Path
     preview_points_path: Path
+    decoded_points_path: Path | None
     metadata_path: Path
 
 
@@ -161,13 +162,15 @@ class GeneratedSQVisualizer:
     def _sample_dir(self, split, sample_index):
         return self.root_dir / self.run_name / split / f"generated_{sample_index:04d}"
 
-    def _write_metadata(self, path, split, sample_index, preview_points, active_primitives):
+    def _write_metadata(self, path, split, sample_index, preview_points, active_primitives, decoded_points=None):
         payload = {
             "split": split,
             "sample_index": int(sample_index),
             "preview_points": int(preview_points),
             "active_primitives": int(active_primitives),
         }
+        if decoded_points is not None:
+            payload["decoded_points"] = int(decoded_points)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         return path
 
@@ -210,7 +213,7 @@ class GeneratedSQVisualizer:
         _write_mesh_obj(path, vertices, mesh_faces, face_colors)
         return path
 
-    def write_generated(self, processed, split="test", num_samples=10):
+    def write_generated(self, processed, split="test", num_samples=10, decoded_points=None):
         batch_size = int(processed["tokens"].shape[0])
         num_samples = min(int(num_samples), batch_size)
         records = []
@@ -221,6 +224,7 @@ class GeneratedSQVisualizer:
 
             sq_mesh_path = sample_dir / "sq_mesh.obj"
             preview_points_path = sample_dir / "preview_points.ply"
+            decoded_points_path = None
             metadata_path = sample_dir / "metadata.json"
 
             self._export_sq_mesh(sq_mesh_path, processed, sample_index)
@@ -233,12 +237,26 @@ class GeneratedSQVisualizer:
                 color=(42, 157, 143),
                 max_points=self.max_preview_points,
             )
+            decoded_count = None
+            if decoded_points is not None:
+                decoded_points_path = sample_dir / "decoded_points.ply"
+                decoded_sample = _to_numpy(decoded_points)[sample_index]
+                non_zero = np.any(np.abs(decoded_sample) > 0, axis=1)
+                decoded_sample = decoded_sample[non_zero]
+                write_point_cloud_ply(
+                    decoded_points_path,
+                    decoded_sample,
+                    color=(231, 111, 81),
+                    max_points=self.max_preview_points,
+                )
+                decoded_count = decoded_sample.shape[0]
             self._write_metadata(
                 metadata_path,
                 split,
                 sample_index,
                 preview_points.shape[0],
                 int(_to_numpy(processed["active_mask"])[sample_index].sum()),
+                decoded_points=decoded_count,
             )
             records.append(
                 GeneratedSQVisualizationRecord(
@@ -247,6 +265,7 @@ class GeneratedSQVisualizer:
                     sample_dir=sample_dir,
                     sq_mesh_path=sq_mesh_path,
                     preview_points_path=preview_points_path,
+                    decoded_points_path=decoded_points_path,
                     metadata_path=metadata_path,
                 )
             )

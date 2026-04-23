@@ -110,8 +110,9 @@ def build_frozen_autodec_decoder(config_path, checkpoint_path=None, device="cpu"
 
 
 def sampled_scaffolds_to_decoder_outdict(processed, residual_dim):
-    batch, primitives = processed["scale"].shape[:2]
-    residual = processed["scale"].new_zeros(batch, primitives, int(residual_dim))
+    """Build a decoder input outdict using zero residuals (Phase 1 bridge)."""
+    batch, n_prim = processed["scale"].shape[:2]
+    residual = processed["scale"].new_zeros(batch, n_prim, int(residual_dim))
     return {
         "scale": processed["scale"],
         "shape": processed["shape"],
@@ -123,8 +124,51 @@ def sampled_scaffolds_to_decoder_outdict(processed, residual_dim):
     }
 
 
+def sampled_joint_scaffolds_to_decoder_outdict(processed):
+    """Build a decoder input outdict using generated residuals (Phase 2 bridge).
+
+    ``processed`` is the output of ``postprocess_joint_tokens`` / ``sample_joint_scaffolds``
+    and must contain ``tokens_z`` with shape [B, 16, residual_dim].
+    """
+    return {
+        "scale": processed["scale"],
+        "shape": processed["shape"],
+        "rotate": processed["rotate"],
+        "trans": processed["trans"],
+        "exist_logit": processed["exist_logit"],
+        "exist": processed["exist"],
+        "residual": processed["tokens_z"],
+    }
+
+
 def decode_scaffolds_with_zero_residual(processed, decoder, residual_dim, return_attention=False):
+    """Phase 1 decode: pass scaffold through frozen AutoDec decoder with Z=0."""
     outdict = sampled_scaffolds_to_decoder_outdict(processed, residual_dim=residual_dim)
+    with torch.no_grad():
+        return decoder(
+            outdict,
+            return_attention=return_attention,
+            return_consistency=False,
+        )
+
+
+def decode_joint_scaffolds(processed, decoder, return_attention=False):
+    """Phase 2 decode: pass joint (E, Z) through frozen AutoDec decoder.
+
+    Uses the generated residual tokens ``processed["tokens_z"]`` instead of
+    zeroing the residual branch.
+
+    Args:
+        processed:       output of ``sample_joint_scaffolds`` / ``postprocess_joint_tokens``
+        decoder:         frozen AutoDecDecoder (from ``build_frozen_autodec_decoder``)
+        return_attention: whether to return decoder attention weights
+
+    Returns:
+        outdict from the AutoDec decoder, containing at minimum
+        ``decoded_points``, ``decoded_offsets``, ``decoded_weights``,
+        and ``surface_points``.
+    """
+    outdict = sampled_joint_scaffolds_to_decoder_outdict(processed)
     with torch.no_grad():
         return decoder(
             outdict,

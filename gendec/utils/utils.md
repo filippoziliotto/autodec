@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`gendec/utils/` contains small reusable helpers that do not belong to a single training, data, or model module. Right now it owns the console logging helper used during Phase 1 training.
+`gendec/utils/` contains small reusable helpers that do not belong to a single training, data, or model module. It currently owns console logging, generated-sample visualization helpers, and the preview-video utility.
 
 ## Maintenance Contract
 
@@ -32,9 +32,9 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
 - `GeneratedSQVisualizer`:
   - `__init__(root_dir="data/viz", run_name="gendec_eval", mesh_resolution=24, exist_threshold=0.5, max_preview_points=4096)`: stores visualization output settings.
   - `_sample_dir(split, sample_index)`: returns the per-generated-sample directory under `data/viz/<run_name>/<split>/`.
-  - `_write_metadata(path, split, sample_index, preview_points, active_primitives)`: writes summary metadata for one generated SQ.
+  - `_write_metadata(path, split, sample_index, preview_points, active_primitives, decoded_points=None)`: writes summary metadata for one generated SQ and optionally records the decoded-point count when a frozen AutoDec reconstruction is available.
   - `_export_sq_mesh(path, processed, sample_index)`: writes the generated active SQ scaffold mesh as OBJ plus MTL.
-  - `write_generated(processed, split="test", num_samples=10)`: writes `sq_mesh.obj`, `preview_points.ply`, and `metadata.json` for generated samples.
+  - `write_generated(processed, split="test", num_samples=10, decoded_points=None)`: writes `sq_mesh.obj`, `preview_points.ply`, `metadata.json`, and, when `decoded_points` is provided, `decoded_points.ply` for generated samples.
 - `write_point_cloud_ply(path, points, color=(210, 210, 210), max_points=None)`: writes a preview point cloud PLY file.
 
 ### `preview_video.py`

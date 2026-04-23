@@ -1,0 +1,7 @@
+export:
+  mode: phase2_toy
+  output_root: gendec/data/ShapeNetPhase2
+  splits: [train, val, test]
+  num_examples: 8
+  num_points: 4096
+  residual_dim: 64

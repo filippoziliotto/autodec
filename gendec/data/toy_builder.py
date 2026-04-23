@@ -7,7 +7,7 @@ from gendec.data.examples import save_teacher_example
 from gendec.data.layout import model_dir, normalization_stats_path, write_split_manifest
 from gendec.data.normalization import compute_normalization_stats, save_normalization_stats
 from gendec.data.splits import resolve_split_names
-from gendec.tokens import PRIMITIVE_COUNT, build_scaffold_tokens
+from gendec.tokens import PRIMITIVE_COUNT, RESIDUAL_DIM_DEFAULT, build_joint_tokens, build_scaffold_tokens
 
 
 def _rotation_6d():
@@ -46,6 +46,28 @@ def build_toy_example(model_id, category_id="03001627", num_points=4096, n_primi
         "category_id": category_id,
         "model_id": model_id,
     }
+
+
+def build_toy_phase2_example(
+    model_id,
+    category_id="03001627",
+    num_points=4096,
+    n_primitives=PRIMITIVE_COUNT,
+    residual_dim=RESIDUAL_DIM_DEFAULT,
+):
+    """Build a Phase 2 toy example that includes residual tokens Z alongside E."""
+    base = build_toy_example(
+        model_id=model_id,
+        category_id=category_id,
+        num_points=num_points,
+        n_primitives=n_primitives,
+    )
+    generator = torch.Generator().manual_seed(_stable_seed(model_id + "_z", category_id))
+    tokens_z = torch.randn(n_primitives, residual_dim, generator=generator) * 0.1
+    tokens_ez = build_joint_tokens(base["tokens_e"], tokens_z)
+    base["tokens_z"] = tokens_z.to(torch.float32)
+    base["tokens_ez"] = tokens_ez.to(torch.float32)
+    return base
 
 
 def write_toy_teacher_dataset(root, split="train", num_examples=8, num_points=4096):
@@ -89,6 +111,55 @@ def write_toy_teacher_dataset(root, split="train", num_examples=8, num_points=40
     }
 
 
+def write_toy_phase2_dataset(
+    root,
+    split="train",
+    num_examples=8,
+    num_points=4096,
+    residual_dim=RESIDUAL_DIM_DEFAULT,
+):
+    """Write a toy Phase 2 dataset that stores joint (E, Z) tokens."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    ez_examples = []
+    model_index = []
+    model_dirs_list = []
+    for idx in range(num_examples):
+        example = build_toy_phase2_example(
+            model_id=f"toy_{split}_{idx:04d}",
+            category_id="03001627",
+            num_points=num_points,
+            residual_dim=residual_dim,
+        )
+        save_teacher_example(root, example)
+        ez_examples.append(example["tokens_ez"])
+        model_dirs_list.append(model_dir(root, example["category_id"], example["model_id"]))
+        model_index.append(
+            {
+                "category_id": example["category_id"],
+                "model_id": example["model_id"],
+            }
+        )
+
+    if split is not None:
+        write_split_manifest(root, split, model_index)
+
+    stats_path = normalization_stats_path(root)
+    should_write_stats = split in {None, "train"} or not stats_path.is_file()
+    if should_write_stats:
+        stats = compute_normalization_stats(torch.stack(ez_examples, dim=0))
+        save_normalization_stats(stats_path, stats)
+
+    return {
+        "root": root,
+        "model_dirs": model_dirs_list,
+        "normalization_path": stats_path,
+        "num_examples": num_examples,
+        "split": split,
+    }
+
+
 def write_toy_teacher_dataset_splits(root, split=None, splits=None, num_examples=8, num_points=4096):
     resolved_splits = resolve_split_names(split=split, splits=splits, default="train")
     results = []
@@ -99,6 +170,29 @@ def write_toy_teacher_dataset_splits(root, split=None, splits=None, num_examples
                 split=split_name,
                 num_examples=num_examples,
                 num_points=num_points,
+            )
+        )
+
+    return {
+        "root": Path(root),
+        "splits": resolved_splits,
+        "results": results,
+        "num_examples": sum(item["num_examples"] for item in results),
+        "normalization_path": results[-1]["normalization_path"] if results else normalization_stats_path(root),
+    }
+
+
+def write_toy_phase2_dataset_splits(root, split=None, splits=None, num_examples=8, num_points=4096, residual_dim=RESIDUAL_DIM_DEFAULT):
+    resolved_splits = resolve_split_names(split=split, splits=splits, default="train")
+    results = []
+    for split_name in resolved_splits:
+        results.append(
+            write_toy_phase2_dataset(
+                root=root,
+                split=split_name,
+                num_examples=num_examples,
+                num_points=num_points,
+                residual_dim=residual_dim,
             )
         )
 

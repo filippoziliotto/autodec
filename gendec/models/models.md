@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`gendec/models/` contains the Phase 1 neural network and geometry helpers: token projection, attention blocks, time embeddings, rotation conversions, and the top-level Set Transformer flow model.
+`gendec/models/` contains the Phase 1 and Phase 2 neural networks plus the shared geometry helpers: token projection, attention blocks, time embeddings, rotation conversions, and the top-level Set Transformer flow models.
 
 ## Maintenance Contract
 
@@ -13,23 +13,15 @@ If the model architecture, tensor contract, or helper geometry conversions chang
 ### `__init__.py`
 
 - Re-export surface for the model layer.
-- Exposes `GlobalToken`, `SetTransformerBlock`, `SetTransformerFlowModel`, `TokenProjection`, `VelocityHead`, `matrix_to_rot6d`, and `rot6d_to_matrix`.
+- Exposes `GlobalToken`, `SetTransformerBlock`, `SetTransformerFlowModel`, `JointSetTransformerFlowModel`, `TokenProjection`, `VelocityHead`, `matrix_to_rot6d`, and `rot6d_to_matrix`.
 
 ### `components.py`
 
 - Reusable model building blocks.
-- `TokenProjection`:
-  - `__init__(token_dim, hidden_dim)`: builds the token projection MLP.
-  - `forward(tokens)`: maps `[B, P, token_dim]` tokens to `[B, P, hidden_dim]`.
-- `GlobalToken`:
-  - `__init__(hidden_dim)`: creates a learned global token parameter.
-  - `forward(batch_size)`: expands the learned token to `[B, 1, hidden_dim]`.
-- `VelocityHead`:
-  - `__init__(hidden_dim, token_dim)`: builds the final token-wise prediction head.
-  - `forward(hidden)`: maps hidden primitive states back to token-dimension velocities.
-- `SetTransformerBlock`:
-  - `__init__(hidden_dim, n_heads, dropout=0.0)`: builds one full self-attention block plus feed-forward sublayer.
-  - `forward(hidden)`: applies attention, residuals, and feed-forward updates to `[B, P+1, hidden_dim]`.
+- `TokenProjection`: token projection MLP from raw token space into hidden space.
+- `GlobalToken`: learned global token expanded to `[B,1,H]`.
+- `VelocityHead`: token-wise velocity prediction head.
+- `SetTransformerBlock`: one self-attention + feed-forward transformer block.
 
 ### `rotation.py`
 
@@ -39,10 +31,13 @@ If the model architecture, tensor contract, or helper geometry conversions chang
 
 ### `set_transformer_flow.py`
 
-- Top-level Phase 1 network.
+- Top-level flow networks.
 - `SetTransformerFlowModel`:
-  - `__init__(token_dim=15, hidden_dim=256, n_blocks=6, n_heads=8, dropout=0.0)`: wires token projection, time embedding, global token, attention blocks, and velocity head.
-  - `forward(et, t)`: predicts token-space velocities from interpolated tokens and scalar times.
+  - `__init__(token_dim=15, hidden_dim=256, n_blocks=6, n_heads=8, dropout=0.0)`: wires token projection, time embedding, global token, attention blocks, and the single velocity head for Phase 1.
+  - `forward(et, t)`: predicts token-space velocities from interpolated scaffold tokens and scalar times.
+- `JointSetTransformerFlowModel`:
+  - `__init__(explicit_dim=15, residual_dim=64, hidden_dim=384, n_blocks=6, n_heads=8, dropout=0.0)`: wires the shared backbone and two output heads for explicit and residual velocities.
+  - `forward(tt, t)`: predicts `v_hat_e`, `v_hat_z`, and the concatenated `v_hat` from interpolated joint tokens and scalar times.
 
 ### `time_embedding.py`
 

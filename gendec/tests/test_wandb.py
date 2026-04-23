@@ -118,3 +118,67 @@ def test_run_train_logs_epoch_metrics_to_wandb(tmp_path, monkeypatch):
     assert "train/all" in payload
     assert "val/all" in payload
     assert "samples/active_primitive_count_mean" in payload
+
+
+def test_run_train_phase2_logs_epoch_metrics_to_wandb(tmp_path, monkeypatch):
+    from gendec.data.toy_builder import write_toy_phase2_dataset
+    from gendec.train_phase2 import run_train_phase2
+
+    root = tmp_path / "ShapeNetPhase2"
+    checkpoint_path = tmp_path / "phase2.pt"
+    sample_dir = tmp_path / "samples_phase2"
+    write_toy_phase2_dataset(root=root, split="train", num_examples=4, num_points=64, residual_dim=4)
+    write_toy_phase2_dataset(root=root, split="val", num_examples=2, num_points=64, residual_dim=4)
+
+    wandb_run = RecordingWandbRun()
+    monkeypatch.setattr("gendec.train_phase2.build_wandb_run", lambda cfg: wandb_run)
+
+    cfg = SimpleNamespace(
+        seed=0,
+        run_name="gendec_phase2_wandb_test",
+        use_wandb=True,
+        wandb=SimpleNamespace(project="gendec-test", api_key_env="WANDB_SECRET"),
+        dataset=SimpleNamespace(root=str(root), split="train", val_split="val"),
+        model=SimpleNamespace(explicit_dim=15, residual_dim=4, hidden_dim=32, n_blocks=2, n_heads=4, dropout=0.0),
+        loss=SimpleNamespace(explicit_dim=15, lambda_e=1.0, lambda_z=1.0, lambda_exist=0.05, exist_channel=-1),
+        optimizer=SimpleNamespace(
+            name="AdamW",
+            lr=1e-3,
+            weight_decay=0.0,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+        ),
+        scheduler=SimpleNamespace(name="cosine", warmup_steps=0, min_lr=1e-5),
+        training=SimpleNamespace(
+            batch_size=2,
+            num_workers=0,
+            num_epochs=1,
+            checkpoint_path=str(checkpoint_path),
+            best_checkpoint_path=str(checkpoint_path.with_name("best.pt")),
+            metrics_path=str(checkpoint_path.with_suffix(".jsonl")),
+            grad_clip_norm=1.0,
+            ema_decay=0.999,
+            amp=False,
+            preview_every=1,
+            preview_dir=str(sample_dir / "train_previews"),
+        ),
+        sampling=SimpleNamespace(
+            preview_num_samples=2,
+            preview_steps=4,
+            eval_steps=4,
+            exist_threshold=0.5,
+            output_dir=str(sample_dir),
+        ),
+        checkpoints=SimpleNamespace(resume_from=None),
+    )
+
+    result = run_train_phase2(cfg)
+
+    assert Path(result["checkpoint_path"]).is_file()
+    assert wandb_run.finished is True
+    assert len(wandb_run.logs) == 1
+    payload, step = wandb_run.logs[0]
+    assert step == 0
+    assert "train/all" in payload
+    assert "val/all" in payload
+    assert "samples/active_primitive_count_mean" in payload

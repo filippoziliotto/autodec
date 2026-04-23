@@ -25,3 +25,4 @@ autodec/keys/keys.sh
 slurm/
 results/
 .torch_extensions/
+*.DS_Store

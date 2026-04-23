@@ -7,9 +7,10 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from gendec.config import cfg_get
-from gendec.data.dataset import ScaffoldTokenDataset
-from gendec.losses.flow_matching import FlowMatchingLoss
-from gendec.models.set_transformer_flow import SetTransformerFlowModel
+from gendec.data.dataset import JointTokenDataset, ScaffoldTokenDataset
+from gendec.losses.flow_matching import FlowMatchingLoss, JointFlowMatchingLoss
+from gendec.models.set_transformer_flow import JointSetTransformerFlowModel, SetTransformerFlowModel
+from gendec.tokens import RESIDUAL_DIM_DEFAULT, TOKEN_DIM
 from gendec.training.schedulers import build_cosine_warmup_scheduler
 
 
@@ -113,7 +114,7 @@ def build_optimizer(cfg, model):
     opt_cfg = cfg_get(cfg, "optimizer")
     name = str(cfg_get(opt_cfg, "name", "AdamW")).lower()
     if name != "adamw":
-        raise ValueError(f"Unsupported optimizer {name!r}; only AdamW is implemented for gendec Phase 1")
+        raise ValueError(f"Unsupported optimizer {name!r}; only AdamW is implemented for gendec")
     return AdamW(
         model.parameters(),
         lr=cfg_get(opt_cfg, "lr", 1e-4),
@@ -131,7 +132,7 @@ def build_scheduler(cfg, optimizer, steps_per_epoch):
     if name is None or str(name).lower() in {"", "none"}:
         return None
     if str(name).lower() != "cosine":
-        raise ValueError(f"Unsupported scheduler {name!r}; only cosine is implemented for gendec Phase 1")
+        raise ValueError(f"Unsupported scheduler {name!r}; only cosine is implemented for gendec")
     training_cfg = _training_cfg(cfg)
     total_steps = max(int(cfg_get(training_cfg, "num_epochs", 1)) * int(steps_per_epoch), 1)
     return build_cosine_warmup_scheduler(
@@ -139,4 +140,71 @@ def build_scheduler(cfg, optimizer, steps_per_epoch):
         total_steps=total_steps,
         warmup_steps=cfg_get(scheduler_cfg, "warmup_steps", 0),
         min_lr=cfg_get(scheduler_cfg, "min_lr", 1e-5),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 builders
+# ---------------------------------------------------------------------------
+
+def build_phase2_dataset(cfg, split=None):
+    dataset_cfg = cfg_get(cfg, "dataset")
+    return JointTokenDataset(
+        root=cfg_get(dataset_cfg, "root"),
+        split=cfg_get(dataset_cfg, "split", None) if split is None else split,
+        categories=cfg_get(dataset_cfg, "categories", None),
+    )
+
+
+def build_phase2_dataloader(cfg, split=None, batch_size=None, shuffle=None):
+    dataset = build_phase2_dataset(cfg, split=split)
+    trainer_cfg = _training_cfg(cfg)
+    resolved_split = cfg_get(cfg_get(cfg, "dataset"), "split", None) if split is None else split
+    if batch_size is None:
+        batch_size = cfg_get(trainer_cfg, "batch_size", 1)
+    if shuffle is None:
+        shuffle = resolved_split in {None, "train"}
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=cfg_get(trainer_cfg, "num_workers", 0),
+        pin_memory=torch.cuda.is_available(),
+    )
+    return dataset, dataloader
+
+
+def build_phase2_train_val_dataloaders(cfg):
+    dataset_cfg = cfg_get(cfg, "dataset")
+    train_split = cfg_get(dataset_cfg, "split", "train")
+    val_split = cfg_get(dataset_cfg, "val_split", "val")
+
+    train_dataset, train_loader = build_phase2_dataloader(cfg, split=train_split, shuffle=True)
+    try:
+        val_dataset, val_loader = build_phase2_dataloader(cfg, split=val_split, shuffle=False)
+    except FileNotFoundError:
+        val_dataset, val_loader = None, None
+    return {"train": train_dataset, "val": val_dataset}, {"train": train_loader, "val": val_loader}
+
+
+def build_phase2_model(cfg):
+    model_cfg = cfg_get(cfg, "model")
+    return JointSetTransformerFlowModel(
+        explicit_dim=cfg_get(model_cfg, "explicit_dim", TOKEN_DIM),
+        residual_dim=cfg_get(model_cfg, "residual_dim", RESIDUAL_DIM_DEFAULT),
+        hidden_dim=cfg_get(model_cfg, "hidden_dim", 384),
+        n_blocks=cfg_get(model_cfg, "n_blocks", 6),
+        n_heads=cfg_get(model_cfg, "n_heads", 8),
+        dropout=cfg_get(model_cfg, "dropout", 0.0),
+    )
+
+
+def build_phase2_loss(cfg):
+    loss_cfg = cfg_get(cfg, "loss")
+    return JointFlowMatchingLoss(
+        explicit_dim=cfg_get(loss_cfg, "explicit_dim", TOKEN_DIM),
+        lambda_e=cfg_get(loss_cfg, "lambda_e", 1.0),
+        lambda_z=cfg_get(loss_cfg, "lambda_z", 1.0),
+        lambda_exist=cfg_get(loss_cfg, "lambda_exist", 0.05),
+        exist_channel=cfg_get(loss_cfg, "exist_channel", -1),
     )

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`gendec/training/` contains the runtime assembly code for Phase 1 training: config-driven builders, checkpoint helpers, epoch logging, and the training loop.
+`gendec/training/` contains the runtime assembly code for Phase 1 and Phase 2 training: config-driven builders, checkpoint helpers, epoch logging, and the training loops.
 
 ## Maintenance Contract
 
@@ -13,78 +13,55 @@ If training construction, checkpoint semantics, or metric logging behavior chang
 ### `__init__.py`
 
 - Re-export surface for the training layer.
-- Exposes `Phase1Trainer`, EMA helpers, dataset/model/loss/optimizer/scheduler builders, config getter, checkpoint helpers, and seed setup.
+- Exposes `Phase1Trainer`, `Phase2Trainer`, EMA helpers, Phase 1 and Phase 2 builders, config getter, checkpoint helpers, and seed setup.
 
 ### `builders.py`
 
 - Config-driven constructors used by train and eval entrypoints.
 - `set_seed(seed)`: seeds Python, NumPy, and PyTorch RNGs.
 - `_import_wandb()`: lazy WandB import helper so disabled runs do not require the package.
-- `build_wandb_run(cfg)`: initializes `wandb.init(project=..., name=run_name)` when `use_wandb` is enabled and the API key is already present in the environment.
+- `build_wandb_run(cfg)`: initializes `wandb.init(project=..., name=run_name)` when `use_wandb` is enabled.
 - `_training_cfg(cfg)`: resolves the training section while keeping backward compatibility with the older `trainer` key.
 - `_sampling_cfg(cfg)`: resolves the sampling section while keeping backward compatibility with the older `sampler` key.
-- `build_dataset(cfg, split=None)`: constructs `ScaffoldTokenDataset`.
-- `build_dataloader(cfg, split=None, batch_size=None, shuffle=None)`: constructs the dataloader with sensible defaults based on split.
-- `build_train_val_dataloaders(cfg)`: builds both train and val dataloaders from the exported teacher dataset.
-- `build_model(cfg)`: instantiates `SetTransformerFlowModel` from config values.
-- `build_loss(cfg)`: instantiates `FlowMatchingLoss`.
-- `build_optimizer(cfg, model)`: instantiates AdamW with config values, including `eps`.
-- `build_scheduler(cfg, optimizer, steps_per_epoch)`: instantiates the cosine warmup scheduler when configured.
+- `build_dataset(cfg, split=None)`, `build_dataloader(...)`, `build_train_val_dataloaders(cfg)`: Phase 1 dataset and loader builders.
+- `build_model(cfg)`, `build_loss(cfg)`: Phase 1 model and loss builders.
+- `build_phase2_dataset(cfg, split=None)`, `build_phase2_dataloader(...)`, `build_phase2_train_val_dataloaders(cfg)`: Phase 2 dataset and loader builders.
+- `build_phase2_model(cfg)`, `build_phase2_loss(cfg)`: Phase 2 model and loss builders.
+- `build_optimizer(cfg, model)`: shared AdamW optimizer builder.
+- `build_scheduler(cfg, optimizer, steps_per_epoch)`: shared cosine warmup scheduler builder.
 
 ### `checkpoints.py`
 
-- Checkpoint persistence and restore helpers.
+- Checkpoint persistence and restore helpers shared by both phases.
 - `strip_module_prefix(state_dict)`: removes `module.` prefixes from DDP-style checkpoints.
-- `save_phase1_checkpoint(model, optimizer, scheduler, epoch, loss, path, ema_model=None)`: serializes raw model weights, optional EMA weights, and optimizer/scheduler state.
+- `save_phase1_checkpoint(model, optimizer, scheduler, epoch, loss, path, ema_model=None)`: serializes model weights, optional EMA weights, and optimizer/scheduler state.
 - `load_phase1_checkpoint(model, path, optimizer=None, scheduler=None, map_location="cpu", load_optimizer=False, use_ema=True)`: restores EMA weights by default when present, and can optionally restore optimizer/scheduler state.
 
 ### `ema.py`
 
-- Exponential moving average support for Phase 1 checkpoints and validation.
-- `ModelEma`:
-  - `__init__(model, decay=0.999)`: clones the model into a frozen EMA copy.
-  - `update(model)`: updates EMA weights after each optimizer step.
-  - `state_dict()`: returns EMA weights for checkpointing.
-  - `load_state_dict(state_dict)`: restores EMA weights.
+- Exponential moving average support.
 
 ### `metric_logger.py`
 
 - Append-only JSONL epoch logger.
-- `_jsonable(value)`: converts nested values into JSON-safe representations.
-- `EpochMetricLogger`:
-  - `__init__(path, append=True)`: prepares the log file and optionally truncates it.
-  - `write(row)`: appends one JSON row.
 
 ### `runtime_metrics.py`
 
 - Metric helpers for validation-time diagnostics and training-time unconditional sampling diagnostics.
-- `_unnormalize_pair(batch, v_hat)`: reconstructs clean tokens and maps predictions/targets back to raw token units.
-- `clean_token_field_mse(batch, v_hat)`: reports per-field MSE over scale, shape, translation, rotation-6D, and existence logit.
-- `existence_prediction_metrics(batch, v_hat)`: reports existence entropy and confident-existence fraction.
-- `teacher_active_count_metrics(batch, threshold=0.5)`: reports active-primitive count statistics for teacher tokens.
-- `sample_scaffold_metrics(processed, valid_shape_range=(0.1, 2.0), orthonormal_tol=1e-3)`: reports sample validity and active-slot statistics after unconditional sampling and postprocessing.
+- `clean_token_field_mse(batch, v_hat)`: Phase 1 explicit per-field MSE.
+- `existence_prediction_metrics(batch, v_hat)`: Phase 1 existence entropy and confidence diagnostics.
+- `teacher_active_count_metrics(batch, threshold=0.5)`: active-slot stats for teacher tokens.
+- `sample_scaffold_metrics(processed, ...)`: Phase 1 sampling validity and active-slot diagnostics.
+- `clean_joint_token_field_mse(batch, v_hat_e, explicit_dim=TOKEN_DIM)`: Phase 2 explicit per-field MSE inside the joint-token batch.
+- `residual_norm_metrics(v_hat_z, batch, explicit_dim=TOKEN_DIM)`: Phase 2 reconstructed residual-latent norm diagnostics.
+- `sample_joint_scaffold_metrics(processed, ...)`: Phase 2 sampling validity and residual diagnostics.
 
 ### `schedulers.py`
 
 - Learning-rate scheduler helpers.
-- `build_cosine_warmup_scheduler(optimizer, total_steps, warmup_steps=0, min_lr=1e-5)`: returns a per-step cosine-decay scheduler with linear warmup and a floor LR.
 
 ### `trainer.py`
 
-- Main training loop implementation.
-- `Phase1Trainer`:
-  - `__init__(model, loss_fn, optimizer, train_dataloader, cfg, device=None, val_dataloader=None, scheduler=None, stats=None, wandb_run=None)`: stores runtime objects, resolves the device, enables optional AMP/EMA, initializes epoch metric logging, and keeps an optional WandB run handle.
-  - `_move_batch(batch)`: moves tensor fields in a batch onto the target device.
-  - `_flow_batch(batch)`: builds the straight-line flow batch from one normalized teacher batch.
-  - `_batch_metrics(batch, flow_batch, v_hat, loss_metrics)`: combines loss metrics with fieldwise errors, existence entropy, and teacher active-slot stats.
-  - `_run_loader(loader, train_mode)`: shared train/val pass with optional optimizer, scheduler, and EMA updates.
-  - `_eval_model()`: chooses EMA weights when available for validation and sampling diagnostics.
-  - `_sample_metrics(epoch)`: runs unconditional sampling, computes active-count and validity metrics, and writes scaffold preview artifacts on schedule.
-  - `train()`: iterates epochs, performs train and val passes, logs unconditional sample diagnostics, saves last/best checkpoints, appends structured epoch rows, and mirrors epoch metrics to WandB when enabled.
-
-The trainer now also:
-
-- wraps train and val dataloaders in `tqdm` progress bars by default
-- updates the progress postfix with the latest batch metrics
-- prints a readable end-of-epoch summary covering `train`, `val`, and `samples`
-- respects `training.disable_tqdm` when you want quiet console output
+- Main training loop implementations.
+- `Phase1Trainer`: Phase 1 train/val loop with sampling diagnostics, tqdm console logging, checkpointing, JSONL logging, EMA, and optional WandB logging.
+- `Phase2Trainer`: Phase 2 train/val loop with joint-token flow batches, split explicit/residual metrics, joint sampling diagnostics, checkpointing, JSONL logging, EMA, and optional WandB logging.

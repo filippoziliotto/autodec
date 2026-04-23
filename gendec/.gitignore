@@ -4,3 +4,4 @@ data/checkpoints/
 data/samples/
 data/smoke_samples/
 data/ShapeNet/
+*.DS_Store

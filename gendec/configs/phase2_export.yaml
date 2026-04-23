@@ -1,0 +1,12 @@
+export:
+  mode: real
+  teacher_kind: autodec
+  output_root: gendec/data/ShapeNetPhase2
+  dataset_path: data/ShapeNet
+  splits: [train, val, test]
+  category_id: "03001627"
+  teacher_config: checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/config.yaml
+  teacher_checkpoint: checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/epoch_200.pt
+  num_points: 4096
+  residual_dim: 64
+  max_items: null

@@ -16,18 +16,28 @@ except ModuleNotFoundError:
 
 from gendec.config import explicit_config_argument, fallback_cli_config, cfg_get, load_yaml_config
 from gendec.data.build_teacher_dataset import export_teacher_dataset
-from gendec.data.toy_builder import write_toy_teacher_dataset_splits
+from gendec.data.toy_builder import write_toy_phase2_dataset_splits, write_toy_teacher_dataset_splits
 
 
 def run_export(cfg):
     export_cfg = cfg_get(cfg, "export")
-    if cfg_get(export_cfg, "mode", "toy") == "toy":
+    mode = str(cfg_get(export_cfg, "mode", "toy")).lower()
+    if mode == "toy":
         return write_toy_teacher_dataset_splits(
             root=cfg_get(export_cfg, "output_root"),
             split=cfg_get(export_cfg, "split", "train"),
             splits=cfg_get(export_cfg, "splits"),
             num_examples=cfg_get(export_cfg, "num_examples", 8),
             num_points=cfg_get(export_cfg, "num_points", 4096),
+        )
+    if mode in {"phase2_toy", "toy_phase2"}:
+        return write_toy_phase2_dataset_splits(
+            root=cfg_get(export_cfg, "output_root"),
+            split=cfg_get(export_cfg, "split", "train"),
+            splits=cfg_get(export_cfg, "splits"),
+            num_examples=cfg_get(export_cfg, "num_examples", 8),
+            num_points=cfg_get(export_cfg, "num_points", 4096),
+            residual_dim=cfg_get(export_cfg, "residual_dim", 64),
         )
     return export_teacher_dataset(cfg)
 

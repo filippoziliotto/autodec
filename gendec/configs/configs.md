@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`gendec/configs/` contains YAML runtime presets for export, training, sampling, smoke runs, and evaluation.
+`gendec/configs/` contains YAML runtime presets for export, training, sampling utilities, smoke runs, and held-out evaluation across both Phase 1 and Phase 2.
 
 ## Maintenance Contract
 
@@ -13,40 +13,46 @@ When any config file changes, this file must be updated to reflect the new purpo
 ### `eval.yaml`
 
 - Main evaluation preset for a trained full-size Phase 1 model.
-- `dataset`: points evaluation at `gendec/data/ShapeNet` with `split: test`.
-- `model`: full-size model dimensions (`hidden_dim=256`, `n_blocks=6`, `n_heads=8`).
-- `loss`: evaluation-time loss settings.
-- `checkpoints.resume_from`: checkpoint path to load, defaulting to the validation-best Phase 1 checkpoint.
-- `eval`: batch size, generated sample count, and output directory.
-- `sampling`: evaluation-time Euler steps and existence threshold used for unconditional sampling during evaluation.
-- `visualization`: writes 10 generated SQ visualizations under `data/viz/<run_name>/test/` by default, including `sq_mesh.obj`, `preview_points.ply`, and metadata.
-- `autodec_decode`: optional eval-only bridge into a frozen AutoDec decoder for zero-residual coarse-generation plausibility metrics.
+- Evaluates `gendec/data/ShapeNet` on `split: test`.
+- Includes optional zero-residual AutoDec decode for coarse plausibility metrics.
 
 ### `eval_val.yaml`
 
-- Validation evaluation preset.
-- Inherits `eval.yaml`, but switches `dataset.split` to `val`.
-- Used by the checked-in validation script so held-out validation and final test runs stay separate.
-- Disables generated-SQ visualization writing so the `data/viz/` export is specific to test evaluation.
+- Validation evaluation preset for Phase 1.
+- Inherits `eval.yaml`, switches to `dataset.split: val`, and disables test-only visualization export.
 
 ### `eval_test.yaml`
 
-- Lightweight evaluation preset for smoke-verified small checkpoints.
-- Same structure as `eval.yaml`, but uses the small smoke model (`hidden_dim=32`, `n_blocks=2`, `n_heads=4`) and the smoke checkpoint path.
-- Also includes a disabled `autodec_decode` block so the eval code path is configurable in smoke-style environments.
-- Keeps visualization writing enabled, but lowers mesh resolution and preview point count for faster smoke execution.
+- Lightweight smoke evaluation preset for small Phase 1 checkpoints.
+- Uses the small debug model and disabled AutoDec decoding for fast local verification.
+
+### `eval_phase2.yaml`
+
+- Main evaluation preset for a trained full-size Phase 2 model.
+- Evaluates `gendec/data/ShapeNetPhase2` on `split: test`.
+- Uses the joint-token model config (`explicit_dim=15`, `residual_dim=64`) and split explicit/residual loss settings.
+- Enables the frozen AutoDec decode branch by default, using:
+  - `checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/config.yaml`
+  - `checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/epoch_200.pt`
+
+### `eval_phase2_val.yaml`
+
+- Validation evaluation preset for Phase 2.
+- Inherits `eval_phase2.yaml`, switches to `dataset.split: val`, disables visualization export, and disables the frozen AutoDec decode branch for lighter validation runs.
+
+### `eval_phase2_test.yaml`
+
+- Lightweight smoke evaluation preset for small Phase 2 checkpoints.
+- Uses the small debug model and keeps the Phase 2 AutoDec decode branch disabled by default for fast local verification.
 
 ### `sample.yaml`
 
-- Sampling-only preset for unconditional generation from a trained checkpoint.
-- `dataset.root`: used to locate normalization stats.
-- `model`: model architecture to instantiate before checkpoint load.
-- `training.best_checkpoint_path`: checkpoint to restore.
-- `sampling`: output count, integration steps, existence threshold, and sample output path.
+- Sampling-only preset for unconditional Phase 1 generation from a trained checkpoint.
+- Uses `dataset.root` only to locate normalization stats and checkpoint-compatible token dimensions.
 
 ### `preview_video.yaml`
 
-- Utility preset for turning training preview checkpoints into per-sample videos.
+- Utility preset for turning saved training preview checkpoints into per-sample videos.
 - `preview_video.preview_dir`: folder containing `epoch_XXXX_preview.pt` artifacts.
 - `preview_video.run_name`: output subfolder name under `gendec/videos/`.
 - `preview_video.output_root`: video root directory.
@@ -57,41 +63,46 @@ When any config file changes, this file must be updated to reflect the new purpo
 
 ### `smoke.yaml`
 
-- End-to-end smoke preset used for toy export, training, and sampling verification.
-- `export`: toy dataset settings, now emitting `train`, `val`, and `test` manifests in one run.
-- `dataset`: training split root plus `val_split`.
-- `model`: small debug model.
-- `loss`, `optimizer`, `scheduler`, `training`: one-epoch fast training setup with validation and preview logging.
-- `sampling`: small sampling run configuration.
-- `use_wandb: false`: keeps smoke verification self-contained.
-- `wandb`: present for schema parity with the main training config.
+- End-to-end smoke preset used for toy Phase 1 export, training, and sampling verification.
 
 ### `teacher_export.yaml`
 
-- Real teacher-export preset.
-- `export.mode: real`: selects the frozen SuperDec export path.
-- `dataset_path`: source ShapeNet directory.
-- `output_root`: target exported dataset root.
-- `splits`: source manifests to mirror into the exported teacher dataset, defaulting to `train`, `val`, and `test`.
-- `category_id`: default category restriction, currently chairs.
-- `teacher_config`, `teacher_checkpoint`: frozen teacher assets.
-- `num_points`, `max_items`: export resolution and optional truncation.
+- Real Phase 1 teacher-export preset.
+- Uses `export.mode: real` and the frozen SuperDec teacher.
+- Writes scaffold-only examples under `gendec/data/ShapeNet`.
+
+### `phase2_export.yaml`
+
+- Real Phase 2 teacher-export preset.
+- Uses `export.mode: real` plus `export.teacher_kind: autodec`.
+- Writes joint-token examples under `gendec/data/ShapeNetPhase2`.
+- Defaults the frozen AutoDec teacher checkpoint to:
+  - `checkpoints/autodec_phase2_ddp3_200ep_bs32_from_p1_cons01_ep50_cons01/epoch_200.pt`
 
 ### `toy_teacher_export.yaml`
 
-- Toy dataset export preset for local verification.
-- `export.mode: toy`: selects synthetic scaffold generation.
-- `output_root`, `splits`, `num_examples`, `num_points`: shape the toy dataset layout and size.
+- Toy export preset for local Phase 1 verification.
+- Uses `export.mode: toy`.
+
+### `toy_phase2_export.yaml`
+
+- Toy export preset for local Phase 2 verification.
+- Uses `export.mode: phase2_toy`.
+- Writes synthetic `tokens_e`, `tokens_z`, and `tokens_ez` under `gendec/data/ShapeNetPhase2`.
 
 ### `train.yaml`
 
 - Main Phase 1 training preset.
-- `use_wandb: true`: enables WandB logging by default for the main training run.
-- `wandb`: WandB project and API-key environment variable settings. The intended workflow is to source `autodec/keys/keys.sh` or otherwise set `WANDB_API_KEY` before launching training.
-- `dataset`: exported dataset root, training split, and validation split.
-- `model`: full-size Set Transformer hyperparameters.
-- `loss`: flow and existence-loss settings.
-- `optimizer`: AdamW hyperparameters, including `eps`.
-- `scheduler`: cosine decay with warmup and minimum LR.
-- `training`: batch size, workers, epochs, AMP, EMA, gradient clipping, checkpoint paths, metric log path, and preview output directory.
-- `sampling`: preview/eval Euler steps plus existence threshold used for training-time sampling diagnostics.
+- Enables WandB by default.
+- Uses AdamW, cosine warmup, EMA, preview sampling, and last/best checkpoint writing.
+
+### `train_phase2.yaml`
+
+- Main Phase 2 training preset.
+- Enables WandB by default.
+- Trains on `gendec/data/ShapeNetPhase2` with the joint-token model and split explicit/residual loss.
+- Writes:
+  - `gendec/data/checkpoints/phase2_last.pt`
+  - `gendec/data/checkpoints/phase2_best.pt`
+  - `gendec/data/checkpoints/phase2_metrics.jsonl`
+- Uses `gendec/data/previews_phase2` for training-time preview artifacts.

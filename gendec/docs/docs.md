@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`gendec/docs/` stores the human-facing design, implementation, and model-reference documents for Phase 1.
+`gendec/docs/` stores the human-facing design, implementation, and model-reference documents for Phase 1 and Phase 2.
 
 ## Maintenance Contract
 
@@ -28,3 +28,8 @@ If implementation, architecture, or runtime behavior changes in a way that inval
 - Project concept note for Gen-Phase 1.
 - Explains why the scaffold prior exists, what the phase includes, and what it explicitly leaves for later phases.
 - Frames the scope as scaffold generation, not dense reconstruction.
+
+### `Phase2.md`
+
+- Design note for the joint Phase 2 prior over `(E, Z)`.
+- Specifies the frozen AutoDec teacher export, the joint token layout, the split explicit/residual flow loss, the shared-backbone two-head Set Transformer, and the optional frozen AutoDec decoder evaluation path.
