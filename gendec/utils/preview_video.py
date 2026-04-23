@@ -1,6 +1,12 @@
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+if __package__ in {None, ""}:
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 import torch
@@ -28,6 +34,13 @@ def collect_preview_epochs(preview_dir, every_n_epochs=10):
         if epoch % int(every_n_epochs) == 0:
             selected.append((epoch, path))
     return selected
+
+
+def ensure_matplotlib_cache_dir(output_root):
+    cache_dir = Path(output_root) / ".matplotlib"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["MPLCONFIGDIR"] = str(cache_dir)
+    return cache_dir
 
 
 def _points_from_preview(path, sample_index=0):
@@ -79,36 +92,92 @@ def _frame_from_points(points, epoch, image_size=(640, 640)):
     return frame
 
 
+def _write_frames(selected, frame_dir, sample_index=0):
+    from PIL import Image
+
+    frame_paths = []
+    frame_dir = Path(frame_dir)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    for frame_index, (epoch, path) in enumerate(selected):
+        points = _points_from_preview(path, sample_index=sample_index)
+        frame = _frame_from_points(points, epoch)
+        frame_path = frame_dir / f"frame_{frame_index:06d}.png"
+        Image.fromarray(frame, mode="RGB").save(frame_path)
+        frame_paths.append(frame_path)
+    return frame_paths
+
+
+def _ffmpeg_command(frame_dir, video_path, fps):
+    return [
+        shutil.which("ffmpeg") or "ffmpeg",
+        "-y",
+        "-framerate",
+        str(float(fps)),
+        "-i",
+        str(Path(frame_dir) / "frame_%06d.png"),
+        "-c:v",
+        "mpeg4",
+        "-pix_fmt",
+        "yuv420p",
+        str(video_path),
+    ]
+
+
+def _encode_video_with_ffmpeg(frame_dir, video_path, fps=4):
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return False
+    command = _ffmpeg_command(frame_dir, video_path, fps=fps)
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise RuntimeError(f"ffmpeg failed for {video_path}: {stderr}")
+    return True
+
+
 def _build_single_preview_video(
-    preview_dir,
     video_path,
     selected,
     fps=4,
     sample_index=0,
 ):
-    import cv2
-
-    writer = None
+    frame_dir = Path(video_path).with_suffix("")
+    if frame_dir.exists():
+        shutil.rmtree(frame_dir)
     try:
-        for epoch, path in selected:
-            points = _points_from_preview(path, sample_index=sample_index)
-            frame = _frame_from_points(points, epoch)
-            if writer is None:
-                height, width = frame.shape[:2]
-                writer = cv2.VideoWriter(
-                    str(video_path),
-                    cv2.VideoWriter_fourcc(*"mp4v"),
-                    float(fps),
-                    (width, height),
-                )
-                if not writer.isOpened():
-                    raise RuntimeError(f"Could not open video writer for {video_path}")
-            writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    finally:
-        if writer is not None:
-            writer.release()
+        frame_paths = _write_frames(selected, frame_dir, sample_index=sample_index)
+        try:
+            if _encode_video_with_ffmpeg(frame_dir, video_path, fps=fps):
+                return video_path, "ffmpeg"
+        except Exception:
+            pass
 
-    return video_path
+        import cv2
+
+        writer = None
+        try:
+            for frame_path in frame_paths:
+                frame = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
+                if frame is None:
+                    raise RuntimeError(f"Could not read rendered frame {frame_path}")
+                if writer is None:
+                    height, width = frame.shape[:2]
+                    writer = cv2.VideoWriter(
+                        str(video_path),
+                        cv2.VideoWriter_fourcc(*"mp4v"),
+                        float(fps),
+                        (width, height),
+                    )
+                    if not writer.isOpened():
+                        raise RuntimeError(f"Could not open video writer for {video_path}")
+                writer.write(frame)
+        finally:
+            if writer is not None:
+                writer.release()
+    finally:
+        shutil.rmtree(frame_dir, ignore_errors=True)
+
+    return video_path, "opencv"
 
 
 def build_preview_video(
@@ -126,23 +195,27 @@ def build_preview_video(
 
     output_dir = Path(output_root) / str(run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
+    ensure_matplotlib_cache_dir(output_dir)
     video_paths = []
+    backend = None
     for video_index in range(int(num_videos)):
         video_path = output_dir / f"video_{video_index:06d}.mp4"
-        _build_single_preview_video(
-            preview_dir=preview_dir,
+        video_path, current_backend = _build_single_preview_video(
             video_path=video_path,
             selected=selected,
             fps=fps,
             sample_index=int(sample_index) + video_index,
         )
         video_paths.append(video_path)
+        if backend is None:
+            backend = current_backend
 
     return {
         "preview_dir": Path(preview_dir),
         "video_paths": video_paths,
         "num_frames": len(selected),
         "epochs": [epoch for epoch, _ in selected],
+        "backend": backend,
     }
 
 

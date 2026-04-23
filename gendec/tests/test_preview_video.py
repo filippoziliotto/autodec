@@ -37,6 +37,17 @@ def test_collect_preview_epochs_selects_every_10(tmp_path):
     assert [item[0] for item in selected] == [0, 10, 20]
 
 
+def test_ensure_matplotlib_cache_dir_sets_env(tmp_path, monkeypatch):
+    from gendec.utils.preview_video import ensure_matplotlib_cache_dir
+
+    monkeypatch.delenv("MPLCONFIGDIR", raising=False)
+    cache_dir = ensure_matplotlib_cache_dir(tmp_path / "videos")
+
+    assert cache_dir == tmp_path / "videos" / ".matplotlib"
+    assert cache_dir.is_dir()
+    assert cache_dir == Path(__import__("os").environ["MPLCONFIGDIR"])
+
+
 def test_build_preview_video_writes_video_under_run_name(tmp_path):
     from gendec.utils.preview_video import build_preview_video
 
@@ -54,7 +65,9 @@ def test_build_preview_video_writes_video_under_run_name(tmp_path):
     )
 
     assert result["num_frames"] == 2
+    assert result["backend"] in {"ffmpeg", "opencv"}
     assert result["video_paths"][0] == output_root / "gendec_run" / "video_000000.mp4"
     assert result["video_paths"][9] == output_root / "gendec_run" / "video_000009.mp4"
     assert len(result["video_paths"]) == 10
     assert all(path.is_file() for path in result["video_paths"])
+    assert all(path.stat().st_size > 0 for path in result["video_paths"])
