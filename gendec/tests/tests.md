@@ -33,6 +33,10 @@ If a new top-level test file is added here, or an existing test changes scope, t
 - `test_build_flow_batch_constructs_interpolation_and_target_velocity`: verifies the analytic interpolation path and target velocity.
 - `test_flow_matching_loss_returns_flow_and_optional_existence_metrics`: verifies the main loss returns the expected metric keys and a tensor loss.
 
+### `test_imports.py`
+
+- `test_import_gendec_package_does_not_eagerly_import_eval_runtime`: verifies the package root remains importable without eagerly constructing the eval/runtime dependency surface.
+
 ### `test_model.py`
 
 - `test_set_transformer_flow_model_matches_token_contract`: verifies the model input/output tensor shape contract.

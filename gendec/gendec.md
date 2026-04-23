@@ -23,6 +23,7 @@ When code or configs in a documented folder change, the matching folder markdown
 ### `__init__.py`
 
 - Re-exports the public package surface.
+- Uses lazy attribute loading so lightweight entrypoints such as teacher export do not import the full eval/runtime stack at module import time.
 - `ScaffoldTokenDataset`: dataset API for normalized scaffold tokens.
 - `Phase1Evaluator`: evaluator API for held-out token-space evaluation.
 - `FlowMatchingLoss`: main training loss.
