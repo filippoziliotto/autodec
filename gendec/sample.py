@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from gendec.config import fallback_cli_config
+from gendec.config import explicit_config_argument, fallback_cli_config, load_yaml_config
 from gendec.data.layout import normalization_stats_path
 from gendec.data.normalization import load_normalization_stats
 from gendec.sampling import sample_scaffolds
@@ -74,4 +74,8 @@ if hydra is None:
 else:
     main = hydra.main(config_path="configs", config_name="sample", version_base=None)(_main)
     if __name__ == "__main__":
-        main()
+        explicit_config = explicit_config_argument("sample.yaml")
+        if explicit_config is not None:
+            _main(load_yaml_config(explicit_config))
+        else:
+            main()

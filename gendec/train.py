@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from gendec.config import fallback_cli_config
+from gendec.config import explicit_config_argument, fallback_cli_config, load_yaml_config
 from gendec.training.builders import (
     build_scheduler,
     build_train_val_dataloaders,
@@ -72,4 +72,8 @@ if hydra is None:
 else:
     main = hydra.main(config_path="configs", config_name="train", version_base=None)(_main)
     if __name__ == "__main__":
-        main()
+        explicit_config = explicit_config_argument("train.yaml")
+        if explicit_config is not None:
+            _main(load_yaml_config(explicit_config))
+        else:
+            main()

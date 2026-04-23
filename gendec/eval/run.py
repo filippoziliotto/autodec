@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 import torch
 
-from gendec.config import fallback_cli_config, cfg_get
+from gendec.config import explicit_config_argument, fallback_cli_config, cfg_get, load_yaml_config
 from gendec.eval.evaluator import Phase1Evaluator
 from gendec.training.builders import build_dataset, build_loss, build_model, set_seed
 from gendec.training.checkpoints import load_phase1_checkpoint
@@ -45,4 +45,8 @@ if hydra is None:
 else:
     main = hydra.main(config_path="../configs", config_name="eval", version_base=None)(_main)
     if __name__ == "__main__":
-        main()
+        explicit_config = explicit_config_argument("eval.yaml")
+        if explicit_config is not None:
+            _main(load_yaml_config(explicit_config))
+        else:
+            main()

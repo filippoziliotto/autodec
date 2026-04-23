@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import yaml
 
@@ -31,3 +32,15 @@ def fallback_cli_config(default_config_name):
     parser.add_argument("--config", default=str(Path(__file__).parent / "configs" / default_config_name))
     args = parser.parse_args()
     return load_yaml_config(args.config)
+
+
+def explicit_config_argument(default_config_name):
+    argv = sys.argv[1:]
+    for index, arg in enumerate(argv):
+        if arg == "--config":
+            if index + 1 >= len(argv):
+                raise SystemExit("--config requires a path argument")
+            return argv[index + 1]
+        if arg.startswith("--config="):
+            return arg.split("=", 1)[1]
+    return None

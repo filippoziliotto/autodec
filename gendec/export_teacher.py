@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     DictConfig = object
 
-from gendec.config import fallback_cli_config, cfg_get
+from gendec.config import explicit_config_argument, fallback_cli_config, cfg_get, load_yaml_config
 from gendec.data.build_teacher_dataset import export_teacher_dataset
 from gendec.data.toy_builder import write_toy_teacher_dataset_splits
 
@@ -42,4 +42,8 @@ if hydra is None:
 else:
     main = hydra.main(config_path="configs", config_name="teacher_export", version_base=None)(_main)
     if __name__ == "__main__":
-        main()
+        explicit_config = explicit_config_argument("teacher_export.yaml")
+        if explicit_config is not None:
+            _main(load_yaml_config(explicit_config))
+        else:
+            main()
