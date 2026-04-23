@@ -130,13 +130,19 @@ def sampled_joint_scaffolds_to_decoder_outdict(processed):
     ``processed`` is the output of ``postprocess_joint_tokens`` / ``sample_joint_scaffolds``
     and must contain ``tokens_z`` with shape [B, 16, residual_dim].
     """
+    active_mask = processed["active_mask"].unsqueeze(-1)
+    active_bool = active_mask.to(dtype=torch.bool)
+    exist = active_mask.to(dtype=processed["exist"].dtype)
+    positive_logit = processed["exist_logit"].new_full(processed["exist_logit"].shape, 20.0)
+    negative_logit = processed["exist_logit"].new_full(processed["exist_logit"].shape, -20.0)
+    exist_logit = torch.where(active_bool, positive_logit, negative_logit)
     return {
         "scale": processed["scale"],
         "shape": processed["shape"],
         "rotate": processed["rotate"],
         "trans": processed["trans"],
-        "exist_logit": processed["exist_logit"],
-        "exist": processed["exist"],
+        "exist_logit": exist_logit,
+        "exist": exist,
         "residual": processed["tokens_z"],
     }
 

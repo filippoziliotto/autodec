@@ -13,7 +13,15 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
 ### `__init__.py`
 
 - Re-export surface for the utils package.
-- Exposes `TrainingConsoleLogger`, `GeneratedSQVisualizer`, and preview-video helpers.
+- Exposes `TrainingConsoleLogger`, `GeneratedSQVisualizer`, preview-video helpers, and point-pruning helpers for active-primitive inference outputs.
+
+### `inference.py`
+
+- Active-primitive pruning helpers for generated point clouds.
+- `_exist_probability(outdict)`: resolves per-primitive existence probability from `exist` when present, otherwise from `sigmoid(exist_logit)`.
+- `_resample_points(points, target_count)`: deterministically downsamples or repeats a variable-length point cloud to a fixed size.
+- `prune_points_by_active_primitives(outdict, points_key, exist_threshold=0.5, target_count=None)`: keeps only points whose `part_ids` belong to primitives above the existence threshold.
+- `prune_decoded_points(outdict, exist_threshold=0.5, target_count=None)`: convenience wrapper for pruning `decoded_points`.
 
 ### `logger.py`
 
@@ -34,7 +42,7 @@ If a file is added here or the logging/runtime helper behavior changes, this doc
   - `_sample_dir(split, sample_index)`: returns the per-generated-sample directory under `data/viz/<run_name>/<split>/`.
   - `_write_metadata(path, split, sample_index, preview_points, active_primitives, decoded_points=None)`: writes summary metadata for one generated SQ and optionally records the decoded-point count when a frozen AutoDec reconstruction is available.
   - `_export_sq_mesh(path, processed, sample_index)`: writes the generated active SQ scaffold mesh as OBJ plus MTL.
-  - `write_generated(processed, split="test", num_samples=10, decoded_points=None)`: writes `sq_mesh.obj`, `preview_points.ply`, `metadata.json`, and, when `decoded_points` is provided, `decoded_points.ply` for generated samples.
+  - `write_generated(processed, split="test", num_samples=10, decoded_points=None)`: writes `sq_mesh.obj`, `preview_points.ply`, `metadata.json`, and, when `decoded_points` is provided, `decoded_points.ply` for generated samples. `decoded_points` may be either a dense tensor or a per-sample list of already-pruned point clouds.
 - `write_point_cloud_ply(path, points, color=(210, 210, 210), max_points=None)`: writes a preview point cloud PLY file.
 
 ### `preview_video.py`

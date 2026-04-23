@@ -20,7 +20,7 @@ If evaluation metrics, outputs, or checkpoint-loading behavior change, this file
 - Eval-only bridge between sampled `gendec` tokens and a frozen AutoDec decoder.
 - `build_frozen_autodec_decoder(config_path, checkpoint_path=None, device="cpu")`: loads a decoder config, restores only decoder weights from a checkpoint, freezes parameters, and returns the decoder plus residual dimension.
 - `sampled_scaffolds_to_decoder_outdict(processed, residual_dim)`: converts sampled Phase 1 scaffolds into the decoder outdict with zero residuals.
-- `sampled_joint_scaffolds_to_decoder_outdict(processed)`: converts sampled Phase 2 joint tokens into the decoder outdict using generated residuals.
+- `sampled_joint_scaffolds_to_decoder_outdict(processed)`: converts sampled Phase 2 joint tokens into the decoder outdict using generated residuals and replaces soft existence with the sampled hard `active_mask`, encoded as binary `exist` plus `exist_logit in {-20, +20}` so the frozen decoder sees the same active/inactive primitive decision as the SQ visualizations.
 - `decode_scaffolds_with_zero_residual(...)`: Phase 1 zero-residual decode.
 - `decode_joint_scaffolds(...)`: Phase 2 decode using generated `Z`.
 
@@ -30,7 +30,8 @@ If evaluation metrics, outputs, or checkpoint-loading behavior change, this file
 - `_batch_size(batch)`: extracts Phase 1 batch size from `tokens_e`.
 - `Phase1Evaluator`: held-out Phase 1 evaluation plus optional zero-residual AutoDec decode and generated-SQ visualization export.
 - `Phase2Evaluator`: held-out Phase 2 evaluation over `tokens_ez`, optional generated `(E,Z)` AutoDec decoding, and generated-SQ visualization export from the explicit scaffold portion.
-  - When the frozen AutoDec decode branch is enabled on the Phase 2 test split, the visualization folders now include `decoded_points.ply` beside `sq_mesh.obj` and `preview_points.ply`.
+  - When the frozen AutoDec decode branch is enabled on the Phase 2 test split, the evaluator prunes generated `surface_points` and `decoded_points` down to active primitives only before reporting coarse plausibility metrics, writing `generated_autodec_samples.pt`, and exporting `decoded_points.ply`.
+  - The saved batch artifact now contains both pruned and raw point clouds: `decoded_points`, `surface_points`, `decoded_points_raw`, and `surface_points_raw`.
 
 ### `metrics.py`
 

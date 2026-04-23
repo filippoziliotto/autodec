@@ -15,8 +15,8 @@ It owns:
 - training, sampling, and evaluation entrypoints for both phases
 - shell scripts for export, training, validation evaluation, and test evaluation
 - optional eval-only coarse decoding of sampled scaffolds through a frozen AutoDec decoder with zero residual latents
-- Phase 2 joint decoding of sampled `(E,Z)` tokens through the frozen AutoDec decoder
-- generated-SQ visualization exports for test evaluation under `data/viz/`, including Phase 2 `decoded_points.ply` reconstructions when frozen AutoDec decoding is enabled
+- Phase 2 joint decoding of sampled `(E,Z)` tokens through the frozen AutoDec decoder, with the sampled existence threshold applied before coarse reconstruction export
+- generated-SQ visualization exports for test evaluation under `data/viz/`, including Phase 2 `decoded_points.ply` reconstructions pruned to active primitives when frozen AutoDec decoding is enabled
 - preview-video rendering under `gendec/videos/<run_name>/video_000000.mp4`, `video_000001.mp4`, and related per-sample outputs
 - package-level documentation and tests
 

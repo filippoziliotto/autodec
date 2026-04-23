@@ -44,6 +44,15 @@ def _to_numpy(value):
     return np.asarray(value)
 
 
+def _sample_points(value, sample_index):
+    if isinstance(value, (list, tuple)):
+        sample = value[sample_index]
+        if torch.is_tensor(sample):
+            return sample.detach().cpu().numpy()
+        return np.asarray(sample)
+    return _to_numpy(value)[sample_index]
+
+
 def _signed_power(value, exponent, eps=1e-6):
     return np.sign(value) * np.maximum(np.abs(value), eps) ** exponent
 
@@ -240,7 +249,7 @@ class GeneratedSQVisualizer:
             decoded_count = None
             if decoded_points is not None:
                 decoded_points_path = sample_dir / "decoded_points.ply"
-                decoded_sample = _to_numpy(decoded_points)[sample_index]
+                decoded_sample = _sample_points(decoded_points, sample_index)
                 non_zero = np.any(np.abs(decoded_sample) > 0, axis=1)
                 decoded_sample = decoded_sample[non_zero]
                 write_point_cloud_ply(

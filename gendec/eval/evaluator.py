@@ -19,6 +19,7 @@ from gendec.eval.metrics import (
 from gendec.losses.path import build_flow_batch
 from gendec.sampling import sample_joint_scaffolds, sample_scaffolds
 from gendec.training.builders import cfg_get
+from gendec.utils.inference import prune_points_by_active_primitives
 from gendec.utils.visualization import GeneratedSQVisualizer
 
 
@@ -123,6 +124,12 @@ class Phase1Evaluator:
         total_samples = 0
         reference_points = []
         reference_limit = int(cfg_get(self.autodec_decode_cfg, "reference_limit", 32))
+        sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
+        exist_threshold = cfg_get(
+            cfg_get(self.cfg, "eval"),
+            "exist_threshold",
+            cfg_get(sampling_cfg, "exist_threshold", 0.5),
+        )
 
         with torch.no_grad():
             for batch_index, batch in enumerate(self._loader()):
@@ -309,7 +316,9 @@ class Phase2Evaluator:
             generated,
             split=self.split,
             num_samples=cfg_get(vis_cfg, "generated_num_samples", 10),
-            decoded_points=None if generated_autodec is None else generated_autodec.get("decoded_points"),
+            decoded_points=None
+            if generated_autodec is None
+            else generated_autodec.get("decoded_points_pruned", generated_autodec.get("decoded_points")),
         )
 
     def _sample_generated(self, num_samples):
@@ -340,6 +349,12 @@ class Phase2Evaluator:
         total_samples = 0
         reference_points = []
         reference_limit = int(cfg_get(self.autodec_decode_cfg, "reference_limit", 32))
+        sampling_cfg = cfg_get(self.cfg, "sampling", cfg_get(self.cfg, "sampler"))
+        exist_threshold = cfg_get(
+            cfg_get(self.cfg, "eval"),
+            "exist_threshold",
+            cfg_get(sampling_cfg, "exist_threshold", 0.5),
+        )
 
         with torch.no_grad():
             for batch_index, batch in enumerate(self._loader()):
@@ -397,22 +412,35 @@ class Phase2Evaluator:
                 generated,
                 decoder=bridge["decoder"],
             )
+            eval_point_count = cfg_get(self.autodec_decode_cfg, "point_count", 1024)
+            generated_surface_points = prune_points_by_active_primitives(
+                generated_autodec,
+                "surface_points",
+                exist_threshold=exist_threshold,
+                target_count=eval_point_count,
+            )
+            generated_decoded_points = prune_points_by_active_primitives(
+                generated_autodec,
+                "decoded_points",
+                exist_threshold=exist_threshold,
+                target_count=eval_point_count,
+            )
             reference_tensor = torch.stack(reference_points, dim=0).to(self.device)
             metrics.update(
                 nearest_neighbor_paper_metrics(
-                    generated_autodec["surface_points"],
+                    generated_surface_points,
                     reference_tensor,
                     prefix="coarse_surface",
-                    point_count=cfg_get(self.autodec_decode_cfg, "point_count", 1024),
+                    point_count=eval_point_count,
                     f_score_threshold=cfg_get(self.autodec_decode_cfg, "f_score_threshold", 0.01),
                 )
             )
             metrics.update(
                 nearest_neighbor_paper_metrics(
-                    generated_autodec["decoded_points"],
+                    generated_decoded_points,
                     reference_tensor,
                     prefix="coarse_decoded",
-                    point_count=cfg_get(self.autodec_decode_cfg, "point_count", 1024),
+                    point_count=eval_point_count,
                     f_score_threshold=cfg_get(self.autodec_decode_cfg, "f_score_threshold", 0.01),
                 )
             )
@@ -442,8 +470,20 @@ class Phase2Evaluator:
         if generated_autodec is not None:
             torch.save(
                 {
-                    "decoded_points": generated_autodec["decoded_points"].cpu(),
-                    "surface_points": generated_autodec["surface_points"].cpu(),
+                    "decoded_points": prune_points_by_active_primitives(
+                        generated_autodec,
+                        "decoded_points",
+                        exist_threshold=exist_threshold,
+                        target_count=cfg_get(self.autodec_decode_cfg, "point_count", 1024),
+                    ).cpu(),
+                    "surface_points": prune_points_by_active_primitives(
+                        generated_autodec,
+                        "surface_points",
+                        exist_threshold=exist_threshold,
+                        target_count=cfg_get(self.autodec_decode_cfg, "point_count", 1024),
+                    ).cpu(),
+                    "decoded_points_raw": generated_autodec["decoded_points"].cpu(),
+                    "surface_points_raw": generated_autodec["surface_points"].cpu(),
                     "decoded_weights": generated_autodec["decoded_weights"].cpu(),
                     "part_ids": generated_autodec["part_ids"].cpu(),
                 },
@@ -462,6 +502,16 @@ class Phase2Evaluator:
                         visualization_generated,
                         decoder=bridge["decoder"],
                     )
+        if visualization_generated_autodec is not None:
+            visualization_generated_autodec = {
+                **visualization_generated_autodec,
+                "decoded_points_pruned": prune_points_by_active_primitives(
+                    visualization_generated_autodec,
+                    "decoded_points",
+                    exist_threshold=exist_threshold,
+                    target_count=None,
+                ),
+            }
         visualization_records = self._write_generated_visualizations(
             visualization_generated,
             generated_autodec=visualization_generated_autodec,
